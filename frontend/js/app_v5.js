@@ -5,6 +5,8 @@
 let currentSymbol = "EURUSD";
 let ws;
 let isConnected = false;
+let currentAuditFilter = 'all';
+let cachedDecisions = [];
 
 // DOM Elements
 const statusBadge = document.getElementById("status-badge");
@@ -31,6 +33,16 @@ document.addEventListener("DOMContentLoaded", async () => {
             currentSymbol = e.target.innerText;
             fetchChartData(currentSymbol);
             fetchSentimentData(currentSymbol);
+        });
+    });
+
+    // Audit Log Filters
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+            e.target.classList.add("active");
+            currentAuditFilter = e.target.getAttribute("data-filter");
+            renderDecisions(cachedDecisions);
         });
     });
 });
@@ -128,6 +140,11 @@ function initWebSocket() {
             console.log("WS: Message", msg.type);
             if (msg.type === "account_update") {
                 updateAccountUI(msg.data.account, msg.data.positions);
+            } else if (msg.type === "decision_update") {
+                console.log("WS: New Decision!", msg.data);
+                prependDecision(msg.data);
+                // Also refresh dashboard stats in case an order was placed
+                fetchDashboardSummary();
             }
         } catch (e) {
             console.error("WS: Parse error", e);
@@ -191,31 +208,111 @@ function renderPositions(positions) {
         container.innerHTML = `<div class="flex h-full items-center justify-center text-gray-500 text-sm italic">No open positions. Brain is being skeptical.</div>`;
         return;
     }
-    container.innerHTML = positions.map(p => `
-        <div class="bg-panelbg2 rounded-lg p-3 mb-2 border border-gray-800 flex justify-between items-center group">
-            <div>
-                <p class="font-bold text-white text-sm">${p.symbol} <span class="${p.type.includes('BUY') ? 'text-buytext' : 'text-selltext'}">[${p.volume}]</span></p>
-                <p class="text-xs text-gray-500">Open: ${p.open_price}</p>
+    
+    container.innerHTML = positions.map(p => {
+        const isBuy = p.type.includes('BUY');
+        const sideClass = isBuy ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20';
+        const sideText = isBuy ? 'BUY' : 'SELL';
+        
+        // Format time properly
+        const openTime = p.open_time ? new Date(p.open_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
+        
+        return `
+            <div class="bg-panelbg2 rounded-xl p-3 mb-3 border border-gray-800/80 shadow-sm hover:border-gray-700 transition-all group relative overflow-hidden">
+                <div class="flex justify-between items-start mb-2">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="font-bold text-white text-base">${p.symbol}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${sideClass}">${sideText} ${p.volume}</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 font-mono tracking-tighter">ENTRY @ ${p.open_price} • ${openTime}</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="${p.profit >= 0 ? 'text-buytext' : 'text-selltext'} font-bold text-lg leading-tight tracking-tight">
+                            ${p.profit >= 0 ? '+' : ''}$${p.profit.toFixed(2)}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-gray-800/40">
+                    <div class="bg-black/20 rounded p-1.5 border border-gray-800/30">
+                        <span class="block text-[9px] text-gray-500 uppercase font-bold">Stop Loss</span>
+                        <span class="text-xs text-red-400/80 font-mono">${p.stop_loss || 'Not Set'}</span>
+                    </div>
+                    <div class="bg-black/20 rounded p-1.5 border border-gray-800/30">
+                        <span class="block text-[9px] text-gray-500 uppercase font-bold">Take Profit</span>
+                        <span class="text-xs text-emerald-400/80 font-mono">${p.take_profit || 'Not Set'}</span>
+                    </div>
+                </div>
             </div>
-            <div class="text-right">
-                <div class="${p.profit >= 0 ? 'text-buytext' : 'text-selltext'} font-bold">$${p.profit.toFixed(2)}</div>
-            </div>
-        </div>
-    `).join("");
+        `;
+    }).join("");
 }
 
 function renderDecisions(decisions) {
+    cachedDecisions = decisions; // Store for filtering
     const container = document.getElementById("decision-log");
     if (!decisions || decisions.length === 0) return;
-    container.innerHTML = decisions.map(d => `
-        <div class="bg-panelbg2 rounded-lg p-3 mb-2 border-l-4 ${d.action === 'REJECT' ? 'border-gray-700' : 'border-emerald-500'} text-xs">
-            <div class="flex justify-between mb-1">
-                <span class="font-bold text-gray-300">${d.symbol} ${d.action}</span>
-                <span class="text-gray-600">${new Date(d.timestamp).toLocaleTimeString()}</span>
+    
+    const filtered = decisions.filter(d => {
+        if (currentAuditFilter === 'all') return true;
+        if (currentAuditFilter === 'approved') return d.action !== 'REJECT';
+        if (currentAuditFilter === 'rejected') return d.action === 'REJECT';
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = `<div class="text-center text-gray-600 text-xs py-10 italic">No ${currentAuditFilter} decisions yet.</div>`;
+        return;
+    }
+    
+    container.innerHTML = filtered.map(d => getDecisionHTML(d)).join("");
+}
+
+function prependDecision(d) {
+    cachedDecisions.unshift(d);
+    if (cachedDecisions.length > 50) cachedDecisions.pop();
+    
+    // Only update DOM if the new decision matches the current filter
+    if (currentAuditFilter === 'all' || 
+        (currentAuditFilter === 'approved' && d.action !== 'REJECT') ||
+        (currentAuditFilter === 'rejected' && d.action === 'REJECT')) {
+        
+        const container = document.getElementById("decision-log");
+        if (container.innerHTML.includes("italic")) container.innerHTML = "";
+        
+        const div = document.createElement("div");
+        div.innerHTML = getDecisionHTML(d);
+        container.insertBefore(div.firstElementChild, container.firstChild);
+        
+        if (container.children.length > 50) container.removeChild(container.lastChild);
+    }
+}
+
+function getDecisionHTML(d) {
+    const isReject = d.action === 'REJECT';
+    const borderClass = isReject ? 'border-gray-700' : 'border-emerald-500';
+    
+    // Convert to Local Time
+    const dateObj = new Date(d.timestamp);
+    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    const aiBadge = d.ai_active === false ? 
+        `<span class="text-[9px] bg-red-900/20 text-red-500 px-1.5 py-0.5 rounded border border-red-800/30 ml-2 uppercase font-bold tracking-tighter">Indicators Only</span>` :
+        `<span class="text-[9px] bg-blue-900/20 text-blue-500 px-1.5 py-0.5 rounded border border-blue-800/30 ml-2 uppercase font-bold tracking-tighter">AI Layer</span>`;
+
+    return `
+        <div class="bg-panelbg2 rounded-lg p-3 mb-2 border-l-4 ${borderClass} text-xs transition-all duration-500 animate-in slide-in-from-left-2 shadow-sm border border-gray-800/50">
+            <div class="flex justify-between mb-1 items-center">
+                <div class="flex items-center">
+                    <span class="font-bold text-gray-200 tracking-wide">${d.symbol} ${d.action}</span>
+                    ${aiBadge}
+                </div>
+                <span class="text-gray-600 font-mono text-[10px]">${timeStr}</span>
             </div>
-            <p class="text-gray-500">${d.reasoning}</p>
+            <p class="text-gray-500 leading-relaxed">${d.reasoning}</p>
         </div>
-    `).join("");
+    `;
 }
 
 // Settings Modal Logic
@@ -263,18 +360,20 @@ async function saveSettings() {
     const slider = document.getElementById("mode-slider");
     const index = slider.value;
     const mode = modeMetadata[index].value;
+    const useAI = document.getElementById("ai-toggle").checked;
     
     try {
         const res = await fetch("/api/settings/mode", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: mode })
+            body: JSON.stringify({ mode: mode, use_ai_sentiment: useAI })
         });
         
         if (res.ok) {
             const data = await res.json();
             console.log("Settings saved:", data);
             document.getElementById("mode-badge").innerText = data.mode.toUpperCase();
+            updateAISettingsUI(useAI);
             toggleSettingsModal();
             // Refresh summary to reflect potential changes
             fetchDashboardSummary();
@@ -294,6 +393,13 @@ async function fetchSettings() {
             const data = await res.json();
             document.getElementById("mode-badge").innerText = data.trading_mode.toUpperCase();
             
+            // Sync AI toggle
+            const aiToggle = document.getElementById("ai-toggle");
+            if (aiToggle) {
+                aiToggle.checked = data.use_ai_sentiment;
+                updateAISettingsUI(data.use_ai_sentiment);
+            }
+
             // Sync slider
             const index = modeMetadata.findIndex(m => m.value === data.trading_mode);
             if (index !== -1) {
@@ -306,6 +412,19 @@ async function fetchSettings() {
             }
         }
     } catch(e) { console.error(e); }
+}
+
+function updateAISettingsUI(useAI) {
+    const badge = document.getElementById("ai-status-badge");
+    if (!badge) return;
+    
+    if (useAI) {
+        badge.innerText = "ACTIVE";
+        badge.className = "px-3 py-1 rounded-lg text-xs font-bold transition-all border border-emerald-800/50 bg-emerald-900/40 text-emerald-400";
+    } else {
+        badge.innerText = "DISABLED";
+        badge.className = "px-3 py-1 rounded-lg text-xs font-bold transition-all border border-red-800/50 bg-red-900/40 text-red-400 uppercase";
+    }
 }
 
 async function fetchSentimentData(symbol) {
@@ -326,4 +445,5 @@ async function fetchSentimentData(symbol) {
         }
     } catch(e) { console.error(e); }
 }
+
 

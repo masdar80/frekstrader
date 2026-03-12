@@ -12,6 +12,7 @@ router = APIRouter()
 
 class ModeUpdate(BaseModel):
     mode: str
+    use_ai_sentiment: bool = True
 
 @router.put("/mode")
 async def update_trading_mode(req: ModeUpdate):
@@ -23,11 +24,13 @@ async def update_trading_mode(req: ModeUpdate):
         
     # Update in memory
     settings.trading_mode = new_mode
+    settings.use_ai_sentiment = req.use_ai_sentiment
     
     # Ideally save to .env to persist across restarts
     dotenv_file = dotenv.find_dotenv()
     if dotenv_file:
         dotenv.set_key(dotenv_file, "TRADING_MODE", new_mode.value)
+        dotenv.set_key(dotenv_file, "USE_AI_SENTIMENT", "true" if req.use_ai_sentiment else "false")
         
     return {
         "success": True, 
@@ -40,6 +43,7 @@ async def update_trading_mode(req: ModeUpdate):
 async def get_settings():
     return {
         "trading_mode": settings.trading_mode.value,
+        "use_ai_sentiment": settings.use_ai_sentiment,
         "pairs": settings.pairs_list,
         "max_risk_pct": settings.max_risk_per_trade_pct,
         "daily_limit": settings.max_daily_loss_pct,

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # === Trading ===
     trading_pairs: str = "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCHF"
     trading_mode: TradingMode = TradingMode.BALANCED
+    use_ai_sentiment: bool = True
 
     # === Risk Management ===
     max_risk_per_trade_pct: float = 1.5

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 import google.generativeai as genai
+import httpx
 
 from app.config import settings
 from app.utils.logger import logger

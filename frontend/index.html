@@ -97,10 +97,15 @@
 
             <!-- Skeptical Brain Audit Log -->
             <div class="glass-panel h-64 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden">
-                <div class="h-10 border-b border-gray-800/60 flex items-center px-4 bg-panelbg2/50">
+                <div class="h-10 border-b border-gray-800/60 flex items-center justify-between px-4 bg-panelbg2/50 shrink-0">
                     <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
                         <i class="fa-solid fa-brain text-accent"></i> Skeptical Brain Audit
                     </h3>
+                    <div class="flex gap-1" id="audit-filters">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="approved">Approved</button>
+                        <button class="filter-btn" data-filter="rejected">Rejected</button>
+                    </div>
                 </div>
                 <div class="flex-1 overflow-y-auto p-2" id="decision-log">
                     <!-- Logs injected here -->
@@ -133,6 +138,14 @@
                     <span class="text-sm text-gray-400">Trading Mode:</span>
                     <span id="mode-badge" class="px-3 py-1 rounded-lg text-xs font-bold bg-blue-900/40 text-blue-400 border border-blue-800/50">
                         BALANCED
+                    </span>
+                </div>
+                
+                <!-- AI Status Badge -->
+                <div class="mt-2 flex items-center justify-between">
+                    <span class="text-sm text-gray-400">AI Layer:</span>
+                    <span id="ai-status-badge" class="px-3 py-1 rounded-lg text-xs font-bold transition-all border border-emerald-800/50 bg-emerald-900/40 text-emerald-400">
+                        ACTIVE
                     </span>
                 </div>
             </div>
@@ -206,7 +219,18 @@
                 </div>
             </div>
 
-            <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors">
+            <div class="flex items-center justify-between mb-8 p-3 bg-panelbg2 rounded-xl border border-gray-800">
+                <div>
+                    <span class="block text-sm font-bold text-gray-300">AI Sentiment Layer</span>
+                    <span class="text-xs text-gray-500">Isolate trades from AI news & sentiment</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="ai-toggle" class="sr-only peer" checked>
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent hover:after:scale-110"></div>
+                </label>
+            </div>
+
+            <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors shadow-lg shadow-accent/20">
                 Apply Trading Mode
             </button>
         </div>

@@ -14,6 +14,8 @@ from app.core.analysis.signals import normalize_technical_signals, normalize_sen
 from app.core.brain.decision_engine import decision_engine
 from app.core.risk.manager import risk_manager
 from app.core.risk.position_sizer import position_sizer
+from app.api.websocket import manager as ws_manager
+from app.utils.helpers import utcnow
 
 from app.db.database import async_session
 from app.db import crud
@@ -212,6 +214,16 @@ class MarketWatcher:
             trade_id=trade_id,
             signals_json=[s.model_dump() for s in signals]
         )
+        
+        # 7. Broadcast to frontend
+        await ws_manager.broadcast_decision({
+            "symbol": symbol,
+            "action": decision.action,
+            "confidence": decision.confidence,
+            "reasoning": decision.reasoning,
+            "timestamp": utcnow().isoformat(),
+            "ai_active": settings.use_ai_sentiment
+        })
 
 # Global Instance
 watcher = MarketWatcher()

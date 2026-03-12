@@ -69,3 +69,26 @@ input[type=range]::-webkit-slider-thumb {
     box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
     border: 2px solid #fff;
 }
+/* Filter buttons */
+.filter-btn {
+    padding: 0.15rem 0.6rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #6B7280;
+    border-radius: 0.4rem;
+    transition: all 0.2s;
+    background: rgba(31, 41, 55, 0.5);
+    border: 1px solid rgba(75, 85, 99, 0.3);
+}
+
+.filter-btn:hover {
+    color: #F3F4F6;
+    background: rgba(55, 65, 81, 0.7);
+}
+
+.filter-btn.active {
+    color: #fff;
+    background: #3B82F6;
+    border-color: #3B82F6;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}

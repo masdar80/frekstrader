@@ -31,6 +31,13 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def broadcast_decision(self, decision: dict):
+        payload = {
+            "type": "decision_update",
+            "data": decision
+        }
+        await self.broadcast(json.dumps(payload))
+
 manager = ConnectionManager()
 
 
