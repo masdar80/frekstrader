@@ -90,9 +90,6 @@ class MarketWatcher:
                 # Small delay between pairs to avoid rate limits
                 await asyncio.sleep(2)
                 
-            # Commit all decisions, snapshots, and trades for this cycle
-            await db.commit()
-                
         logger.info("--- ✅ Analysis cycle complete ---")
 
     async def _analyze_and_trade_symbol(
@@ -215,7 +212,11 @@ class MarketWatcher:
             signals_json=[s.model_dump() for s in signals]
         )
         
-        # 7. Broadcast to frontend
+        # 7. Commit immediately for real-time visibility
+        await db.commit()
+        
+        # 8. Broadcast to frontend
+        logger.info(f"  📡 Broadcasting {symbol} {decision.action} to dashboard...")
         await ws_manager.broadcast_decision({
             "symbol": symbol,
             "action": decision.action,

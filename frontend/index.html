@@ -98,9 +98,14 @@
             <!-- Skeptical Brain Audit Log -->
             <div class="glass-panel h-64 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden">
                 <div class="h-10 border-b border-gray-800/60 flex items-center justify-between px-4 bg-panelbg2/50 shrink-0">
-                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
-                        <i class="fa-solid fa-brain text-accent"></i> Skeptical Brain Audit
-                    </h3>
+                    <div class="flex items-center gap-2">
+                        <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                            <i class="fa-solid fa-brain text-accent"></i> Skeptical Brain Audit
+                        </h3>
+                        <span id="audit-heartbeat" class="text-[9px] text-gray-600 font-mono mt-0.5 opacity-0 transition-opacity">
+                            <i class="fa-solid fa-bolt text-yellow-500/50"></i> Pulse: --:--:--
+                        </span>
+                    </div>
                     <div class="flex gap-1" id="audit-filters">
                         <button class="filter-btn active" data-filter="all">All</button>
                         <button class="filter-btn" data-filter="approved">Approved</button>

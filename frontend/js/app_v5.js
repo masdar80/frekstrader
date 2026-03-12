@@ -55,25 +55,32 @@ function initChart() {
         const container = document.getElementById('chart-container');
         if (!container || typeof LightweightCharts === 'undefined') return;
 
+        // If container height is 0, wait and retry
+        if (container.clientHeight === 0) {
+            console.warn("Chart: Container has no height, retrying...");
+            setTimeout(initChart, 200);
+            return;
+        }
+
         chart = LightweightCharts.createChart(container, {
             layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9CA3AF' },
             grid: { vertLines: { color: 'rgba(31, 41, 55, 0.5)' }, horzLines: { color: 'rgba(31, 41, 55, 0.5)' } },
             timeScale: { borderColor: 'rgba(31, 41, 55, 0.5)', timeVisible: true },
         });
 
-        // Resilience: check for multiple naming variations of the series creators
-        if (typeof chart.addCandlestickSeries === 'function') {
-            candleSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#EF4444' });
-        } else if (typeof chart.addAreaSeries === 'function') {
-            candleSeries = chart.addAreaSeries({ lineColor: '#3B82F6' });
-        }
+        // Use standard naming for candlestick series
+        candleSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#EF4444', borderVisible: false, wickVisible: true });
 
-        new ResizeObserver(entries => {
-            if (entries[0] && chart) chart.applyOptions({ width: entries[0].contentRect.width, height: entries[0].contentRect.height });
-        }).observe(container);
+        const resizeObserver = new ResizeObserver(entries => {
+            if (entries[0] && chart) {
+                const { width, height } = entries[0].contentRect;
+                chart.applyOptions({ width, height });
+                chart.timeScale().fitContent();
+            }
+        });
+        resizeObserver.observe(container);
         
         fetchChartData(currentSymbol);
-        fetchSentimentData(currentSymbol);
     } catch(e) { console.error("initChart Error:", e); }
 }
 
@@ -89,7 +96,13 @@ async function fetchChartData(symbol) {
         // Always hide the "Connecting..." overlay if we got a valid response
         document.getElementById("chart-overlay").classList.add("opacity-0", "pointer-events-none");
 
-        if (data.candles && data.candles.length > 0 && candleSeries) {
+        if (data.candles && data.candles.length > 0) {
+            console.log(`API: Received ${data.candles.length} candles for ${symbol}`);
+            if (!candleSeries) {
+                console.warn("Chart: candleSeries not ready, waiting...");
+                setTimeout(() => fetchChartData(symbol), 500);
+                return;
+            }
             const mapped = data.candles.map(c => ({
                 time: new Date(c.time).getTime() / 1000,
                 open: c.open, high: c.high, low: c.low, close: c.close
@@ -97,11 +110,11 @@ async function fetchChartData(symbol) {
             candleSeries.setData(mapped);
             chart.timeScale().fitContent();
         } else {
-             console.warn("No candles returned for", symbol);
+             console.warn("No candles returned for", symbol, data);
         }
     } catch (e) { 
         console.error("Chart Data Error:", e);
-        document.getElementById("chart-overlay").innerHTML = '<div class="text-center text-red-400">Error Loading Chart</div>';
+        document.getElementById("chart-overlay").innerHTML = `<div class="text-center text-red-400">Error: ${e.message}</div>`;
     }
 }
 
@@ -142,6 +155,7 @@ function initWebSocket() {
                 updateAccountUI(msg.data.account, msg.data.positions);
             } else if (msg.type === "decision_update") {
                 console.log("WS: New Decision!", msg.data);
+                updateAuditPulse();
                 prependDecision(msg.data);
                 // Also refresh dashboard stats in case an order was placed
                 fetchDashboardSummary();
@@ -153,6 +167,20 @@ function initWebSocket() {
     } catch(e) {
         console.error("initWebSocket failed:", e);
     }
+}
+
+function updateAuditPulse() {
+    const el = document.getElementById("audit-heartbeat");
+    if (!el) return;
+    el.classList.remove("opacity-0");
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.innerHTML = `<i class="fa-solid fa-bolt text-yellow-400 animate-pulse"></i> Pulse: ${time}`;
+    
+    // Fade out after 2 seconds
+    clearTimeout(window.pulseTimeout);
+    window.pulseTimeout = setTimeout(() => {
+        el.classList.add("opacity-100");
+    }, 2000);
 }
 
 function updateConnectionStatus(connected) {
@@ -217,6 +245,23 @@ function renderPositions(positions) {
         // Format time properly
         const openTime = p.open_time ? new Date(p.open_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
         
+        // Calculate Profit/Loss at TP and SL
+        const contractSize = 100000;
+        const isJPY = p.symbol.includes("JPY");
+        let tpProfit = "0.00";
+        let slLoss = "0.00";
+        
+        const calcVal = (target) => {
+            if (!target) return "N/A";
+            const diff = isBuy ? (target - p.open_price) : (p.open_price - target);
+            let val = diff * p.volume * contractSize;
+            if (isJPY) val = val / p.current_price;
+            return val.toFixed(2);
+        };
+        
+        tpProfit = calcVal(p.take_profit);
+        slLoss = calcVal(p.stop_loss);
+
         return `
             <div class="bg-panelbg2 rounded-xl p-3 mb-3 border border-gray-800/80 shadow-sm hover:border-gray-700 transition-all group relative overflow-hidden">
                 <div class="flex justify-between items-start mb-2">
@@ -225,23 +270,33 @@ function renderPositions(positions) {
                             <span class="font-bold text-white text-base">${p.symbol}</span>
                             <span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ${sideClass}">${sideText} ${p.volume}</span>
                         </div>
-                        <p class="text-[10px] text-gray-500 font-mono tracking-tighter">ENTRY @ ${p.open_price} • ${openTime}</p>
+                        <p class="text-[10px] text-gray-400 font-mono tracking-tighter">
+                            ENTRY @ ${p.open_price.toFixed(5)} <br/>
+                            <span class="text-accent font-bold">CURRENT @ ${p.current_price.toFixed(5)}</span>
+                        </p>
                     </div>
                     <div class="text-right">
                         <div class="${p.profit >= 0 ? 'text-buytext' : 'text-selltext'} font-bold text-lg leading-tight tracking-tight">
                             ${p.profit >= 0 ? '+' : ''}$${p.profit.toFixed(2)}
                         </div>
+                        <span class="text-[9px] text-gray-500 uppercase">${openTime}</span>
                     </div>
                 </div>
                 
                 <div class="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-gray-800/40">
                     <div class="bg-black/20 rounded p-1.5 border border-gray-800/30">
                         <span class="block text-[9px] text-gray-500 uppercase font-bold">Stop Loss</span>
-                        <span class="text-xs text-red-400/80 font-mono">${p.stop_loss || 'Not Set'}</span>
+                        <div class="flex justify-between items-end">
+                            <span class="text-xs text-red-400/80 font-mono">${p.stop_loss ? p.stop_loss.toFixed(5) : 'Not Set'}</span>
+                            <span class="text-[8px] text-red-500/60 font-bold">${slLoss !== "N/A" ? '$' + slLoss : ''}</span>
+                        </div>
                     </div>
                     <div class="bg-black/20 rounded p-1.5 border border-gray-800/30">
                         <span class="block text-[9px] text-gray-500 uppercase font-bold">Take Profit</span>
-                        <span class="text-xs text-emerald-400/80 font-mono">${p.take_profit || 'Not Set'}</span>
+                        <div class="flex justify-between items-end">
+                            <span class="text-xs text-emerald-400/80 font-mono">${p.take_profit ? p.take_profit.toFixed(5) : 'Not Set'}</span>
+                            <span class="text-[8px] text-emerald-500/60 font-bold">${tpProfit !== "N/A" ? '$' + tpProfit : ''}</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -250,16 +305,29 @@ function renderPositions(positions) {
 }
 
 function renderDecisions(decisions) {
-    cachedDecisions = decisions; // Store for filtering
-    const container = document.getElementById("decision-log");
     if (!decisions || decisions.length === 0) return;
     
-    const filtered = decisions.filter(d => {
+    // MERGE LOGIC: Keep newer local decisions that might not be in the server's list yet
+    const combined = [...cachedDecisions];
+    decisions.forEach(d => {
+        // Simple check: if this exact timestamp/symbol doesn't exist in combined, add it
+        const exists = combined.some(c => c.timestamp === d.timestamp && c.symbol === d.symbol);
+        if (!exists) combined.push(d);
+    });
+
+    // Sort by timestamp descending
+    combined.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    // Keep internal cache limited
+    cachedDecisions = combined.slice(0, 100);
+    
+    const container = document.getElementById("decision-log");
+    const filtered = cachedDecisions.filter(d => {
         if (currentAuditFilter === 'all') return true;
         if (currentAuditFilter === 'approved') return d.action !== 'REJECT';
         if (currentAuditFilter === 'rejected') return d.action === 'REJECT';
         return true;
-    });
+    }).slice(0, 50); // Show top 50
 
     if (filtered.length === 0) {
         container.innerHTML = `<div class="text-center text-gray-600 text-xs py-10 italic">No ${currentAuditFilter} decisions yet.</div>`;
@@ -293,8 +361,12 @@ function getDecisionHTML(d) {
     const isReject = d.action === 'REJECT';
     const borderClass = isReject ? 'border-gray-700' : 'border-emerald-500';
     
+    // Ensure timestamp is treated as UTC if no offset is present
+    let ts = d.timestamp;
+    if (ts && !ts.includes('Z') && !ts.includes('+')) ts += 'Z';
+    
     // Convert to Local Time
-    const dateObj = new Date(d.timestamp);
+    const dateObj = new Date(ts);
     const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
     const aiBadge = d.ai_active === false ? 
