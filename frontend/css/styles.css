@@ -1,0 +1,71 @@
+/* Custom Animations and Glassmorphism */
+
+.hidden-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.hidden-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.glass {
+    background: rgba(21, 26, 35, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-panel {
+    background: rgba(21, 26, 35, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+.glow-text {
+    text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+}
+
+/* Pair selector buttons */
+.pair-btn {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #9CA3AF;
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+    background: transparent;
+}
+
+.pair-btn:hover {
+    color: #F3F4F6;
+    background: rgba(31, 41, 55, 0.5);
+}
+
+.pair-btn.active {
+    color: #3B82F6;
+    background: rgba(59, 130, 246, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+}
+
+/* Decision Log cards */
+.log-card {
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
+}
+.log-card:hover {
+    background: rgba(31, 41, 55, 0.4);
+}
+.log-card.buy { border-left-color: #10B981; }
+.log-card.sell { border-left-color: #EF4444; }
+.log-card.reject { border-left-color: #6B7280; }
+
+/* Custom Range Slider */
+input[type=range]::-webkit-slider-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #3B82F6;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+    border: 2px solid #fff;
+}

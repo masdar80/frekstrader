@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ForeksTrader | AI Skeptic Brain</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <!-- Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        darkbg: '#0B0E14',
+                        panelbg: '#151A23',
+                        panelbg2: '#1C222D',
+                        accent: '#3B82F6',
+                        accenthover: '#2563EB',
+                        buytext: '#10B981',
+                        buybg: 'rgba(16, 185, 129, 0.15)',
+                        selltext: '#EF4444',
+                        sellbg: 'rgba(239, 68, 68, 0.15)',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-darkbg text-gray-300 font-sans h-screen overflow-hidden flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-panelbg border-b border-gray-800 h-16 flex items-center justify-between px-6 shrink-0 z-10 glass">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <i class="fa-solid fa-robot text-white text-sm"></i>
+            </div>
+            <h1 class="text-xl font-bold tracking-tight text-white glow-text">ForeksTrader</h1>
+            <span id="status-badge" class="ml-4 px-2.5 py-1 rounded-full text-xs font-medium bg-red-900/40 text-red-400 border border-red-800/50 flex items-center gap-1.5 transition-colors">
+                <div class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div> Offline
+            </span>
+        </div>
+
+        <div class="flex items-center gap-6">
+            <!-- Account Summary Mini -->
+            <div class="flex items-center gap-4 text-sm bg-panelbg2 px-4 py-2 rounded-xl border border-gray-800/50">
+                <div class="flex flex-col">
+                    <span class="text-gray-500 text-xs uppercase tracking-wider">Equity</span>
+                    <span id="nav-equity" class="font-bold text-white transition-all duration-300">--</span>
+                </div>
+                <div class="w-px h-8 bg-gray-800"></div>
+                <div class="flex flex-col">
+                    <span class="text-gray-500 text-xs uppercase tracking-wider">Today <span id="nav-pnl-pct"></span></span>
+                    <span id="nav-pnl" class="font-bold text-gray-400 transition-all duration-300">--</span>
+                </div>
+            </div>
+            
+            <!-- Quick Settings -->
+            <button class="w-10 h-10 rounded-xl bg-panelbg2 border border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex items-center justify-center" onclick="toggleSettingsModal()">
+                <i class="fa-solid fa-sliders"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="flex-1 p-4 grid grid-cols-12 gap-4 overflow-hidden">
+        
+        <!-- Left Column: Chart & Brain -->
+        <div class="col-span-12 lg:col-span-8 flex flex-col gap-4 h-full">
+            
+            <!-- Chart Panel -->
+            <div class="glass-panel flex-1 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden relative shadow-2xl">
+                <div class="h-12 border-b border-gray-800/60 flex items-center justify-between px-4">
+                    <div class="flex gap-2" id="pair-selector">
+                        <button class="pair-btn active">EURUSD</button>
+                        <button class="pair-btn">GBPUSD</button>
+                        <button class="pair-btn">USDJPY</button>
+                        <button class="pair-btn">AUDUSD</button>
+                        <button class="pair-btn">USDCHF</button>
+                    </div>
+                </div>
+                <div id="chart-container" class="flex-1 relative w-full h-full">
+                    <!-- Chart renders here -->
+                    <div id="chart-overlay" class="absolute inset-0 flex items-center justify-center bg-panelbg/80 z-10 backdrop-blur-sm transition-opacity">
+                        <div class="text-center">
+                            <i class="fa-solid fa-circle-notch fa-spin text-accent text-3xl mb-3"></i>
+                            <p class="text-gray-400 text-sm">Connecting to Broker...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skeptical Brain Audit Log -->
+            <div class="glass-panel h-64 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden">
+                <div class="h-10 border-b border-gray-800/60 flex items-center px-4 bg-panelbg2/50">
+                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                        <i class="fa-solid fa-brain text-accent"></i> Skeptical Brain Audit
+                    </h3>
+                </div>
+                <div class="flex-1 overflow-y-auto p-2" id="decision-log">
+                    <!-- Logs injected here -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Positions, Sentiment, Account -->
+        <div class="col-span-12 lg:col-span-4 flex flex-col gap-4 h-full overflow-y-auto hidden-scrollbar">
+            
+            <!-- Account Metrics -->
+            <div class="glass-panel p-5 rounded-2xl border border-gray-800/60 bg-gradient-to-b from-panelbg to-panelbg/50 relative overflow-hidden">
+                <div class="absolute -right-10 -top-10 w-32 h-32 bg-accent/10 rounded-full blur-3xl"></div>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-4">Account Portfolio</h3>
+                
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <p class="text-gray-400 text-sm mb-1">Balance</p>
+                        <p class="text-lg font-bold text-white" id="stat-balance">--</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-400 text-sm mb-1">Free Margin</p>
+                        <p class="text-lg font-bold text-white" id="stat-margin">--</p>
+                    </div>
+                </div>
+                
+                <!-- Trading Mode Badge -->
+                <div class="mt-4 pt-4 border-t border-gray-800/60 flex items-center justify-between">
+                    <span class="text-sm text-gray-400">Trading Mode:</span>
+                    <span id="mode-badge" class="px-3 py-1 rounded-lg text-xs font-bold bg-blue-900/40 text-blue-400 border border-blue-800/50">
+                        BALANCED
+                    </span>
+                </div>
+            </div>
+
+            <!-- News Sentiment -->
+            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col">
+                <div class="p-4 border-b border-gray-800/60 flex justify-between items-center">
+                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                        <i class="fa-solid fa-newspaper text-purple-400"></i> AI Sentiment
+                    </h3>
+                    <span class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">Live</span>
+                </div>
+                <div class="p-4 flex flex-col gap-3" id="sentiment-container">
+                    <!-- Injected -->
+                    <div class="text-center text-gray-500 text-sm py-4">Waiting for analysis...</div>
+                </div>
+            </div>
+
+            <!-- Active Positions -->
+            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col flex-1 min-h-[250px]">
+                <div class="p-4 border-b border-gray-800/60 flex justify-between items-center">
+                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                        <i class="fa-solid fa-briefcase text-emerald-400"></i> Open Positions
+                    </h3>
+                    <span id="pos-count" class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">0</span>
+                </div>
+                <div class="flex-1 overflow-y-auto p-2" id="positions-list">
+                    <!-- Positions injected here -->
+                    <div class="flex h-full items-center justify-center text-gray-500 text-sm italic">
+                        No open positions. Brain is being skeptical.
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-panelbg border border-gray-700/60 rounded-2xl w-full max-w-md shadow-2xl transform scale-95 transition-transform duration-300 p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl font-bold text-white">Aggression Settings</h2>
+                <button onclick="toggleSettingsModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-400 mb-3">Skeptical Brain Mode</label>
+                <input type="range" id="mode-slider" min="0" max="4" step="1" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-accent">
+                
+                <div class="flex justify-between text-xs text-gray-500 mt-2 font-medium">
+                    <span>Ultra Cons.</span>
+                    <span>Cons.</span>
+                    <span>Bal.</span>
+                    <span>Aggr.</span>
+                    <span>Ultra Aggr.</span>
+                </div>
+            </div>
+
+            <div class="bg-panelbg2 rounded-xl p-4 border border-gray-800 mb-6">
+                <h4 id="mode-title" class="font-bold text-accent mb-2">Balanced</h4>
+                <p id="mode-desc" class="text-sm text-gray-400 mb-4">Requires 3+ indicators to agree. Medium position sizing.</p>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <span class="text-gray-500 block text-xs">Threshold</span>
+                        <span id="mode-thresh" class="font-bold text-gray-300">> 0.65</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 block text-xs">Max Risk</span>
+                        <span id="mode-risk" class="font-bold text-gray-300">1.5%</span>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors">
+                Apply Trading Mode
+            </button>
+        </div>
+    </div>
+
+    <script src="/static/js/app_v5.js"></script>
+</body>
+</html>
