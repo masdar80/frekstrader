@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     metaapi_account_id: str = ""
 
     # === MT5 ===
-    mt5_login: str = "5047751989"
-    mt5_server: str = "MetaQuotes-Demo"
+    mt5_login: str = ""
+    mt5_server: str = ""
     mt5_password: str = ""
 
     # === Database ===
@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     # === Server ===
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    debug: bool = True
+    debug: bool = False
+    app_api_key: str = ""
+    allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
 
     class Config:
         env_file = ".env"

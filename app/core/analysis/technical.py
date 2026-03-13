@@ -196,9 +196,16 @@ class TechnicalAnalyzer:
             if bb is None or bb.empty:
                 return None
 
-            upper = float(bb.iloc[-1, 0])  # Upper band
-            middle = float(bb.iloc[-1, 1])  # Middle band
-            lower = float(bb.iloc[-1, 2])  # Lower band
+            # pandas-ta bbands returns columns: BBL_20_2.0, BBM_20_2.0, BBU_20_2.0, BBB_20_2.0, BBP_20_2.0
+            # Use column name matching for safety
+            bb_cols = bb.columns.tolist()
+            lower_col = [c for c in bb_cols if c.startswith("BBL")][0]
+            middle_col = [c for c in bb_cols if c.startswith("BBM")][0]
+            upper_col = [c for c in bb_cols if c.startswith("BBU")][0]
+
+            lower = float(bb[lower_col].iloc[-1])
+            middle = float(bb[middle_col].iloc[-1])
+            upper = float(bb[upper_col].iloc[-1])
             price = float(df["close"].iloc[-1])
 
             band_width = upper - lower
@@ -283,9 +290,16 @@ class TechnicalAnalyzer:
             if adx_df is None or adx_df.empty:
                 return None
 
-            adx_val = float(adx_df.iloc[-1, 0])  # ADX
-            plus_di = float(adx_df.iloc[-1, 1])   # +DI
-            minus_di = float(adx_df.iloc[-1, 2])  # -DI
+            # pandas-ta adx returns columns: ADX_14, DMP_14, DMN_14
+            # Use column name matching for safety
+            adx_cols = adx_df.columns.tolist()
+            adx_col = [c for c in adx_cols if c.startswith("ADX")][0]
+            dmp_col = [c for c in adx_cols if c.startswith("DMP")][0]
+            dmn_col = [c for c in adx_cols if c.startswith("DMN")][0]
+
+            adx_val = float(adx_df[adx_col].iloc[-1])
+            plus_di = float(adx_df[dmp_col].iloc[-1])
+            minus_di = float(adx_df[dmn_col].iloc[-1])
 
             if adx_val > 25:
                 if plus_di > minus_di:

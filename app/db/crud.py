@@ -79,6 +79,11 @@ async def create_snapshot(db: AsyncSession, **kwargs) -> AccountSnapshot:
     return snapshot
 
 
+async def get_latest_snapshot(db: AsyncSession) -> Optional[AccountSnapshot]:
+    result = await db.execute(select(AccountSnapshot).order_by(desc(AccountSnapshot.timestamp)).limit(1))
+    return result.scalar_one_or_none()
+
+
 async def get_daily_pnl(db: AsyncSession) -> float:
     """Get total P&L for today from closed trades."""
     today_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)

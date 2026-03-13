@@ -2,6 +2,7 @@
 ForeksTrader — Main FastAPI Application
 """
 import os
+import secrets
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -25,6 +26,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"   Pairs: {settings.pairs_list}")
     logger.info(f"   Confidence Threshold: {settings.confidence_threshold}")
     logger.info(f"   Max Risk/Trade: {settings.effective_max_risk_pct}%")
+
+    # Generate API Key if not set
+    if not settings.app_api_key:
+        new_key = secrets.token_urlsafe(32)
+        logger.warning(f"🔑 No API Key found. Generated new key: {new_key}")
+        logger.warning("   (Please save this to your .env file as APP_API_KEY)")
+        settings.app_api_key = new_key
+        # Try to append to .env
+        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        try:
+            with open(env_path, "a") as f:
+                f.write(f"\n# Auto-generated API Key for manual trading\nAPP_API_KEY={new_key}\n")
+            logger.info("   Saved new API key to .env file")
+        except Exception as e:
+            logger.error(f"   Failed to save API key to .env: {e}")
 
     # Create DB tables
     async with engine.begin() as conn:
@@ -51,13 +67,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for local frontend development
+# CORS middleware
+origins = [o.strip() for o in settings.allowed_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*", "X-API-Key"],
 )
 
 # === API Routes ===

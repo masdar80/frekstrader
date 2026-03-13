@@ -3,6 +3,7 @@
  */
 
 let currentSymbol = "EURUSD";
+let currentTimeframe = "15m";
 let ws;
 let isConnected = false;
 let currentAuditFilter = 'all';
@@ -31,8 +32,18 @@ document.addEventListener("DOMContentLoaded", async () => {
             document.querySelectorAll(".pair-btn").forEach(b => b.classList.remove("active"));
             e.target.classList.add("active");
             currentSymbol = e.target.innerText;
-            fetchChartData(currentSymbol);
+            fetchChartData(currentSymbol, currentTimeframe);
             fetchSentimentData(currentSymbol);
+        });
+    });
+
+    // Timeframe selector listeners
+    document.querySelectorAll("#tf-selector .filter-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            document.querySelectorAll("#tf-selector .filter-btn").forEach(b => b.classList.remove("active"));
+            e.target.classList.add("active");
+            currentTimeframe = e.target.getAttribute("data-tf");
+            fetchChartData(currentSymbol, currentTimeframe);
         });
     });
 
@@ -80,13 +91,19 @@ function initChart() {
         });
         resizeObserver.observe(container);
         
-        fetchChartData(currentSymbol);
+        fetchChartData(currentSymbol, currentTimeframe);
+        
+        // Auto-refresh chart every 30 seconds
+        if (window.chartRefreshInterval) clearInterval(window.chartRefreshInterval);
+        window.chartRefreshInterval = setInterval(() => {
+            if (isConnected) fetchChartData(currentSymbol, currentTimeframe);
+        }, 30000);
     } catch(e) { console.error("initChart Error:", e); }
 }
 
-async function fetchChartData(symbol) {
+async function fetchChartData(symbol, timeframe) {
     try {
-        const res = await fetch(`/api/analysis/chart/${symbol}`);
+        const res = await fetch(`/api/analysis/chart/${symbol}?timeframe=${timeframe || '15m'}`);
         if (!res.ok) {
              document.getElementById("chart-overlay").innerHTML = '<div class="text-center text-red-400">Broker Error</div>';
              return;
@@ -97,10 +114,10 @@ async function fetchChartData(symbol) {
         document.getElementById("chart-overlay").classList.add("opacity-0", "pointer-events-none");
 
         if (data.candles && data.candles.length > 0) {
-            console.log(`API: Received ${data.candles.length} candles for ${symbol}`);
+            console.log(`API: Received ${data.candles.length} candles for ${symbol} (${timeframe})`);
             if (!candleSeries) {
                 console.warn("Chart: candleSeries not ready, waiting...");
-                setTimeout(() => fetchChartData(symbol), 500);
+                setTimeout(() => fetchChartData(symbol, timeframe), 500);
                 return;
             }
             const mapped = data.candles.map(c => ({
@@ -279,7 +296,10 @@ function renderPositions(positions) {
                         <div class="${p.profit >= 0 ? 'text-buytext' : 'text-selltext'} font-bold text-lg leading-tight tracking-tight">
                             ${p.profit >= 0 ? '+' : ''}$${p.profit.toFixed(2)}
                         </div>
-                        <span class="text-[9px] text-gray-500 uppercase">${openTime}</span>
+                        <div class="flex justify-end gap-2 mt-1 items-center">
+                            <span class="text-[9px] text-gray-500 uppercase">${openTime}</span>
+                            <button onclick="closePosition('${p.id}')" class="bg-red-900/40 hover:bg-red-800 text-red-300 text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-red-800/50 transition-colors">Close</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -501,21 +521,98 @@ function updateAISettingsUI(useAI) {
 
 async function fetchSentimentData(symbol) {
     const container = document.getElementById("sentiment-container");
+    container.innerHTML = `<div class="text-center text-gray-500 text-sm py-4"><i class="fa-solid fa-circle-notch fa-spin text-accent mb-2"></i><br>Analyzing news...</div>`;
     try {
-        const res = await fetch(`/api/analysis/signals/${symbol}?limit=1`);
+        const res = await fetch(`/api/analysis/sentiment/${symbol}`);
         if (res.ok) {
             const data = await res.json();
-            if (data.length > 0) {
-                const s = data[0];
-                container.innerHTML = `
-                    <div class="p-3 bg-panelbg2 rounded-xl border border-gray-800">
-                        <p class="text-sm font-bold">Confidence: ${(s.confidence*100).toFixed(0)}%</p>
-                        <p class="text-xs text-gray-400 mt-1">${s.reasoning}</p>
+            
+            // Format base/quote breakdown
+            const baseObj = data.base || {};
+            const quoteObj = data.quote || {};
+            
+            // Render structured sentiment view
+            const signalColor = data.signal === 'BUY' ? 'text-emerald-400' : (data.signal === 'SELL' ? 'text-red-400' : 'text-gray-400');
+            const scorePercent = Math.abs(data.score * 100).toFixed(0);
+            
+            container.innerHTML = `
+                <div class="flex items-center justify-between px-2 mb-1">
+                    <span class="text-sm font-bold text-gray-300">${symbol} Outlook</span>
+                    <span class="text-lg font-bold ${signalColor}">${data.signal}</span>
+                </div>
+                
+                <div class="bg-panelbg2 rounded-xl border border-gray-800 p-3 mb-2">
+                    <p class="text-[11px] text-gray-400 leading-relaxed italic mb-2 border-l-2 border-accent pl-2">
+                        "${baseObj.reasoning || data.score}"
+                    </p>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-gray-500">Net Strength</span>
+                        <span class="font-bold ${signalColor}">${scorePercent}%</span>
                     </div>
-                `;
-            }
+                    <div class="w-full bg-gray-800 rounded-full h-1.5 mt-1 overflow-hidden flex">
+                        <div class="${data.score > 0 ? 'bg-emerald-500' : 'bg-red-500'} h-1.5" style="width: ${scorePercent}% ${data.score < 0 ? '; margin-left: auto' : ''}"></div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-panelbg2 rounded-lg p-2 border border-gray-800">
+                        <span class="text-[10px] text-gray-500 uppercase block">${symbol.substring(0,3)} News</span>
+                        <span class="font-bold text-xs ${baseObj.score > 0 ? 'text-emerald-400' : (baseObj.score < 0 ? 'text-red-400' : 'text-gray-400')}">
+                            ${(baseObj.score * 100).toFixed(0)}%
+                        </span>
+                    </div>
+                    <div class="bg-panelbg2 rounded-lg p-2 border border-gray-800">
+                        <span class="text-[10px] text-gray-500 uppercase block">${symbol.substring(3,6)} News</span>
+                        <span class="font-bold text-xs ${quoteObj.score > 0 ? 'text-emerald-400' : (quoteObj.score < 0 ? 'text-red-400' : 'text-gray-400')}">
+                            ${(quoteObj.score * 100).toFixed(0)}%
+                        </span>
+                    </div>
+                </div>
+            `;
+        } else {
+             container.innerHTML = `<div class="text-center text-red-500 text-sm py-4">Sentiment API Error</div>`;
         }
-    } catch(e) { console.error(e); }
+    } catch(e) { 
+        console.error(e); 
+        container.innerHTML = `<div class="text-center text-gray-500 text-sm py-4">Network error loading sentiment</div>`;
+    }
+}
+
+async function closePosition(id) {
+    if (!confirm("Are you sure you want to manually close this position?")) return;
+    
+    // Attempt to retrieve API key before sending
+    // For local dev, we might not have it in the UI unless provided
+    // If endpoints are protected, UI needs a way to store X-API-Key.
+    // For now, we will send the request. If it 403s, we alert the user.
+    try {
+        // First try to fetch the key from local storage if the user saved it
+        let headers = { "Content-Type": "application/json" };
+        const savedKey = localStorage.getItem("foreks_api_key");
+        if (savedKey) headers["X-API-Key"] = savedKey;
+
+        const res = await fetch(`/api/trading/close/${id}`, {
+            method: "POST",
+            headers: headers
+        });
+        
+        if (res.ok) {
+            console.log("Position closed");
+            fetchDashboardSummary(); // refresh UI
+        } else if (res.status === 403) {
+            const key = prompt("API Key required for manual trading. Please enter your APP_API_KEY from .env:");
+            if (key) {
+                localStorage.setItem("foreks_api_key", key);
+                closePosition(id); // Retry
+            }
+        } else {
+            const data = await res.json();
+            alert(`Error closing position: ${data.detail || "Unknown error"}`);
+        }
+    } catch(e) {
+        console.error("Close Error:", e);
+        alert("Failed to close position: network error");
+    }
 }
 
 
