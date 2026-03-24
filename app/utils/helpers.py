@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def format_pips(value: float, digits: int = 5) -> float:

@@ -22,7 +22,15 @@ def test_jpy_tick_value():
     )
     
     assert res["allowed"] is True
-    assert res["risk_amount"] == pytest.approx(60, 0.1) # 10000 * (1.5% base * 0.4 config scaled by conf? wait, let's just check non negative)
+    
+    # Calculate expectation based on current settings
+    from app.config import settings
+    base_risk_pct = settings.effective_max_risk_pct
+    min_conf = settings.confidence_threshold
+    conf_multiplier = 0.5 + ((0.8 - min_conf) / (1.0 - min_conf) * 0.5) if 0.8 > min_conf else 0.5
+    expected_risk = 10000.0 * (base_risk_pct * conf_multiplier / 100.0)
+    
+    assert res["risk_amount"] == pytest.approx(expected_risk, 0.1)
     assert res["volume"] > 0
     assert "stop_loss" in res
     

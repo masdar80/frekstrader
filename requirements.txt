@@ -4,9 +4,9 @@ uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 
 # === MetaAPI & Data ===
-pandas==2.2.2
-pandas-ta==0.3.14b1
-numpy==1.26.4
+pandas
+pandas-ta
+numpy
 
 # === Database ===
 sqlalchemy[asyncio]==2.0.32

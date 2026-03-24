@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db.database import engine, Base
-from app.api.routes import trading, analysis, dashboard, backtest, settings as settings_routes
+from app.api.routes import trading, analysis, dashboard, backtest, settings as settings_routes, emergency
 from app.api.websocket import router as ws_router, broadcast_market_data
 from app.workers.market_watcher import watcher
 from app.utils.logger import logger
@@ -83,6 +83,7 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(emergency.router, prefix="/api/emergency", tags=["Emergency"])
 app.include_router(ws_router, tags=["WebSocket"])
 
 # === Static Files (Frontend) ===

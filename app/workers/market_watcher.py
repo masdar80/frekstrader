@@ -18,6 +18,7 @@ from app.core.broker.metaapi_client import broker
 from app.core.analysis.technical import technical_analyzer
 from app.core.analysis.sentiment import sentiment_engine
 from app.core.analysis.signals import normalize_technical_signals, normalize_sentiment_signals
+from app.core.analysis.calendar import economic_calendar
 from app.core.brain.decision_engine import decision_engine
 from app.core.risk.manager import risk_manager
 from app.core.risk.position_sizer import position_sizer
@@ -33,11 +34,13 @@ class MarketWatcher:
 
     def __init__(self):
         self.is_running = False
+        self.is_paused = False
         self.sleep_interval = 30          # Run every 30 seconds
         self.sentiment_interval = 900     # Refresh sentiment every 15 minutes
         self._last_sentiment_run = 0.0
         self._sentiment_cache: Dict[str, Dict[str, Any]] = {}
         self._peak_equity: float = 0.0    # Tracked persistently
+        self._broker_semaphore = asyncio.Semaphore(5)  # Max 5 concurrent broker requests
 
     async def start(self):
         self.is_running = True
@@ -76,11 +79,18 @@ class MarketWatcher:
 
     async def _run_cycle(self):
         """One complete execution cycle for all pairs."""
+        if self.is_paused:
+            logger.info("⏸️ Market Watcher PAUSED. Skipping analysis cycle...")
+            return
+
         logger.info(f"--- 🔄 Starting analysis cycle for {len(settings.pairs_list)} pairs ---")
 
         # 1. Fetch current account state
         account_info = await broker.get_account_info()
         open_positions = await broker.get_positions()
+
+        # 1.5. Reconcile broker positions with DB open trades to detect closures
+        await self._reconcile_positions(open_positions)
 
         # 2. Track peak equity properly (persist across restarts)
         current_equity = account_info.get("equity", 0)
@@ -107,27 +117,27 @@ class MarketWatcher:
                 peak_equity=self._peak_equity,
                 drawdown_pct=round(drawdown_pct, 2),
             )
+            await db.commit()
 
-            # 3. Check if sentiment needs refreshing (every 15 min)
-            now = time.time()
-            if now - self._last_sentiment_run > self.sentiment_interval:
-                logger.info("📰 Refreshing sentiment for all pairs...")
-                await self._refresh_all_sentiment()
-                self._last_sentiment_run = now
+        # 3. Check if sentiment needs refreshing (every 15 min)
+        now = time.time()
+        if now - self._last_sentiment_run > self.sentiment_interval:
+            logger.info("📰 Refreshing sentiment for all pairs...")
+            await self._refresh_all_sentiment()
+            self._last_sentiment_run = now
 
-            # 4. Process all pairs concurrently
-            tasks = [
-                self._analyze_and_trade_symbol(
-                    symbol, db, account_info, open_positions,
-                    daily_pnl, weekly_pnl, self._peak_equity
-                )
-                for symbol in settings.pairs_list
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for symbol, result in zip(settings.pairs_list, results):
-                if isinstance(result, Exception):
-                    logger.error(f"Error processing {symbol}: {result}")
+        # 4. Process all pairs concurrently (each with its own DB session)
+        tasks = [
+            self._analyze_and_trade_symbol(
+                symbol, account_info, open_positions,
+                daily_pnl, weekly_pnl, self._peak_equity
+            )
+            for symbol in settings.pairs_list
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for symbol, result in zip(settings.pairs_list, results):
+            if isinstance(result, Exception):
+                logger.error(f"Error processing {symbol}: {result}")
 
         logger.info("--- ✅ Analysis cycle complete ---")
 
@@ -144,24 +154,31 @@ class MarketWatcher:
             await asyncio.sleep(0.5)  # Small delay to avoid rate limits
 
     async def _analyze_and_trade_symbol(
-        self, symbol: str, db, account_info, open_positions,
+        self, symbol: str, account_info, open_positions,
         daily_pnl, weekly_pnl, peak_equity
     ):
         """The core pipeline for a single currency pair."""
         logger.info(f"🔎 Analyzing {symbol}...")
 
-        # 1. Fetch Market Data — all timeframes CONCURRENTLY
-        candle_tasks = {
-            tf: broker.get_candles(symbol, timeframe=tf, count=200)
-            for tf in technical_analyzer.TIMEFRAMES
-        }
-        candle_results = await asyncio.gather(*candle_tasks.values(), return_exceptions=True)
-        candles_by_tf = {}
-        for tf, result in zip(candle_tasks.keys(), candle_results):
-            if isinstance(result, list):
-                candles_by_tf[tf] = result
-            else:
-                logger.warning(f"Candle fetch failed for {symbol}/{tf}: {result}")
+        # 1. Fetch Market Data — rate limited
+        async with self._broker_semaphore:
+            current_price_data = await broker.get_price(symbol)
+            if not current_price_data:
+                logger.warning(f"Failed to fetch current price for {symbol}")
+                return
+
+        async with self._broker_semaphore:
+            candle_tasks = {
+                tf: broker.get_candles(symbol, timeframe=tf, count=200)
+                for tf in technical_analyzer.TIMEFRAMES
+            }
+            candle_results = await asyncio.gather(*candle_tasks.values(), return_exceptions=True)
+            candles_by_tf = {}
+            for tf, result in zip(candle_tasks.keys(), candle_results):
+                if isinstance(result, list):
+                    candles_by_tf[tf] = result
+                else:
+                    logger.warning(f"Candle fetch failed for {symbol}/{tf}: {result}")
 
         current_price = current_price_data["ask"]
         bid_price = current_price_data.get("bid", current_price)
@@ -173,7 +190,7 @@ class MarketWatcher:
         ta_raw_results = technical_analyzer.analyze(candles_by_tf)
         ta_confluence = technical_analyzer.get_confluence_score(ta_raw_results)
 
-        # 3. Sentiment — use cached results (refreshed on separate timer)
+        # 4. Sentiment — use cached results (refreshed on separate timer)
         sentiment_result = self._sentiment_cache.get(symbol, {
             "symbol": symbol, "signal": "NEUTRAL", "score": 0.0,
             "strength": 0.0, "confidence": 0.0,
@@ -189,116 +206,147 @@ class MarketWatcher:
         if settings.use_ai_sentiment:
             signals.append(normalize_sentiment_signals(symbol, sentiment_result))
 
-        # Save signals to DB
-        for sig in signals:
-            await crud.create_signal(
-                db,
-                symbol=sig.symbol,
-                source=sig.source,
-                direction=sig.direction,
-                strength=sig.strength,
-                confidence=sig.confidence,
-                reasoning=sig.reasoning[:1000],
-                data_json=sig.metadata
-            )
-
-        # 4. Skeptical Brain Engine
-        decision = decision_engine.evaluate_signals(symbol, signals)
-
-        # 5. Risk Management & Execution
-        trade_executed = False
-        trade_id = None
-
-        if decision.action in ["BUY", "SELL"]:
-            # Check Spread (protect against news spikes)
-            # symbol_info["spread"] is often the typical/floating spread in points
-            # If current spread > 2x typical spread, or > 50 points, reject
-            typical_spread_points = symbol_info.get("spread", 0)
-            point_value = symbol_info.get("point", 0.00001)
-            current_spread_points = current_spread / point_value if point_value else 0
-            
-            spread_ok = True
-            if current_spread_points > max(50, typical_spread_points * 2):
-                spread_ok = False
-                decision.action = "REJECT"
-                decision.reasoning += f" | Spread too high: {current_spread_points:.1f} pts (typical: {typical_spread_points})"
-                logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts")
-
-            if spread_ok:
-                # Check Risk
-                risk_check = risk_manager.check_trade_allowed(
-                    symbol, account_info, open_positions,
-                    daily_pnl, weekly_pnl, peak_equity
+        # Perform the DB operations in a fresh session
+        async with async_session() as db:
+            # Save signals to DB
+            for sig in signals:
+                await crud.create_signal(
+                    db,
+                    symbol=sig.symbol,
+                    source=sig.source,
+                    direction=sig.direction,
+                    strength=sig.strength,
+                    confidence=sig.confidence,
+                    reasoning=sig.reasoning[:1000],
+                    data_json=sig.metadata
                 )
 
-                if risk_check["allowed"]:
-                    # Get ATR for Stop Loss calculation (fallback to 15 pips if ATR fails)
-                    atr_val = 0.0015
-                    if "ATR" in ta_raw_results and ta_raw_results["ATR"]:
-                        atr_val = ta_raw_results["ATR"][-1].value
+            # 4. Skeptical Brain Engine
+            decision = decision_engine.evaluate_signals(symbol, signals)
 
-                    # Calculate Size
-                    size_data = position_sizer.calculate(
-                        symbol, decision.action, current_price, account_info["equity"],
-                        atr_val, symbol_info, decision.confidence
-                    )
+            # 5. Risk Management & Execution
+            trade_executed = False
+            trade_id = None
+            risk_check = None
+            size_data = None
 
-                    if size_data["allowed"]:
-                        # EXECUTE TRADE
-                        logger.critical(
-                            f"🚀 EXECUTING {decision.action} onto {symbol} "
-                            f"| Vol: {size_data['volume']}"
-                        )
+            if decision.action in ["BUY", "SELL"]:
+                # Check Spread (protect against news spikes)
+                typical_spread_points = symbol_info.get("spread", 0)
+                point_value = symbol_info.get("point", 0.00001)
+                current_spread_points = current_spread / point_value if point_value else 0
+                
+                spread_ok = True
+                if current_spread_points > max(50, typical_spread_points * 2):
+                    spread_ok = False
+                    decision.action = "REJECT"
+                    decision.reasoning += f" | Spread too high: {current_spread_points:.1f} pts (typical: {typical_spread_points})"
+                    logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts")
 
-                        order_res = await broker.place_order(
-                            symbol, decision.action, size_data["volume"],
-                            stop_loss=size_data["stop_loss"],
-                            take_profit=size_data["take_profit"]
-                        )
-
-                        if "success" in order_res and order_res["success"]:
-                            trade_executed = True
-
-                            # Save to DB
-                            db_trade = await crud.create_trade(
-                                db,
-                                external_id=order_res.get("position_id", ""),
-                                symbol=symbol,
-                                direction=decision.action,
-                                volume=size_data["volume"],
-                                open_price=current_price,
-                                stop_loss=size_data["stop_loss"],
-                                take_profit=size_data["take_profit"],
-                                trading_mode=settings.trading_mode.value,
-                                metadata_json={"risk_amount": size_data["risk_amount"]}
-                            )
-                            trade_id = db_trade.id
-                        else:
-                            decision.reasoning += f" | Order failed: {order_res.get('error')}"
+                if spread_ok:
+                    # Check Economic Calendar
+                    calendar_check = await economic_calendar.is_safe_to_trade(symbol)
+                    if not calendar_check["safe"]:
+                        decision.action = "REJECT"
+                        decision.reasoning += f" | Calendar blocked: {calendar_check['reason']}"
+                        logger.warning(f"  ❌ Calendar blocked {symbol}: {calendar_check['reason']}")
                     else:
-                        decision.reasoning += f" | Sizing failed: {size_data.get('reason')}"
-                        decision.action = "REJECT"
-                else:
-                    if spread_ok:  # Only override if it wasn't already rejected by spread
-                        decision.action = "REJECT"
-                        decision.reasoning += f" | Risk blocked: {risk_check['reason']}"
-                        logger.warning(f"  ❌ Risk blocked {symbol}: {risk_check['reason']}")
+                        # Check Risk
+                        risk_check = risk_manager.check_trade_allowed(
+                            symbol, decision.action, account_info, open_positions,
+                            daily_pnl, weekly_pnl, peak_equity
+                        )
 
-        # 6. Save Decision Audit Trail
-        await crud.create_decision(
-            db,
-            symbol=symbol,
-            action=decision.action,
-            confidence=decision.confidence,
-            trading_mode=decision.mode_used,
-            threshold_used=decision.threshold,
-            reasoning=decision.reasoning,
-            trade_id=trade_id,
-            signals_json=[s.model_dump() for s in signals]
-        )
+                        if risk_check["allowed"]:
+                            # Get ATR for Stop Loss calculation (fallback to 15 pips if ATR fails)
+                            atr_val = 0.0015
+                            if "ATR" in ta_raw_results and ta_raw_results["ATR"]:
+                                atr_val = ta_raw_results["ATR"][-1].value
 
-        # 7. Commit immediately for real-time visibility
-        await db.commit()
+                            # Calculate Size
+                            size_data = position_sizer.calculate(
+                                symbol, decision.action, current_price, account_info["equity"],
+                                atr_val, symbol_info, decision.confidence
+                            )
+
+                            if size_data["allowed"]:
+                                # EXECUTE TRADE
+                                logger.critical(
+                                    f"🚀 EXECUTING {decision.action} onto {symbol} "
+                                    f"| Vol: {size_data['volume']}"
+                                )
+
+                                order_res = await broker.place_order(
+                                    symbol, decision.action, size_data["volume"],
+                                    stop_loss=size_data["stop_loss"],
+                                    take_profit=size_data["take_profit"]
+                                )
+
+                                if "success" in order_res and order_res["success"]:
+                                    trade_executed = True
+                                    
+                                    # Post-Execution Verification
+                                    await asyncio.sleep(1.0) # Wait for broker to settle position
+                                    new_positions = await broker.get_positions(use_cache=False)
+                                    pos_id = order_res.get("position_id")
+                                    actual_fill_price = current_price
+                                    
+                                    if pos_id:
+                                        matching_pos = next((p for p in new_positions if p.get("id") == pos_id), None)
+                                        if matching_pos:
+                                            actual_fill_price = matching_pos.get("openPrice", current_price)
+                                            # Calculate slippage in pips
+                                            is_jpy = "JPY" in symbol
+                                            pip_multiplier = 100 if is_jpy else 10000
+                                            slippage_pips = abs(actual_fill_price - current_price) * pip_multiplier
+                                            
+                                            if slippage_pips > settings.max_slippage_pips:
+                                                logger.critical(f"⚠️ HIGH SLIPPAGE DETECTED on {symbol}: Expected {current_price:.5f}, Filled {actual_fill_price:.5f} ({slippage_pips:.1f} pips)")
+                                                decision.reasoning += f" | Slippage Alert: {slippage_pips:.1f} pips"
+                                            
+                                            # Verify SL and TP were set
+                                            if not matching_pos.get("stopLoss") or not matching_pos.get("takeProfit"):
+                                                logger.critical(f"⚠️ MISSING SL/TP on {symbol} position {pos_id}")
+
+                                    # Save to DB
+                                    db_trade = await crud.create_trade(
+                                        db,
+                                        external_id=order_res.get("position_id", ""),
+                                        symbol=symbol,
+                                        direction=decision.action,
+                                        volume=size_data["volume"],
+                                        open_price=actual_fill_price,
+                                        stop_loss=size_data["stop_loss"],
+                                        take_profit=size_data["take_profit"],
+                                        trading_mode=settings.trading_mode.value,
+                                        metadata_json={"risk_amount": size_data["risk_amount"]}
+                                    )
+                                    trade_id = db_trade.id
+                                else:
+                                    decision.reasoning += f" | Order failed: {order_res.get('error')}"
+                            else:
+                                decision.reasoning += f" | Sizing failed: {size_data.get('reason')}"
+                                decision.action = "REJECT"
+                        else:
+                            decision.action = "REJECT"
+                            decision.reasoning += f" | Risk blocked: {risk_check['reason']}"
+                            logger.warning(f"  ❌ Risk blocked {symbol}: {risk_check['reason']}")
+
+            # 6. Save Decision Audit Trail
+            await crud.create_decision(
+                db,
+                symbol=symbol,
+                action=decision.action,
+                confidence=decision.confidence,
+                trading_mode=decision.mode_used,
+                threshold_used=decision.threshold,
+                reasoning=decision.reasoning,
+                trade_id=trade_id,
+                signals_json=[s.model_dump() for s in signals]
+            )
+
+            # 7. Commit immediately for real-time visibility
+            await db.commit()
 
         # 8. Broadcast to frontend
         logger.info(f"  📡 Broadcasting {symbol} {decision.action} to dashboard...")
@@ -308,8 +356,73 @@ class MarketWatcher:
             "confidence": decision.confidence,
             "reasoning": decision.reasoning,
             "timestamp": utcnow().isoformat(),
-            "ai_active": settings.use_ai_sentiment
+            "ai_active": settings.use_ai_sentiment,
+            "indicators": ta_confluence.get("breakdown", []),
+            "sentiment": sentiment_result,
+            "risk_check": risk_check if decision.action in ["BUY", "SELL"] else None,
+            "sizing": size_data if trade_executed else None
         })
+
+    async def _reconcile_positions(self, open_positions: List[Dict[str, Any]]):
+        """Reconcile broker positions with DB open trades to detect closures."""
+        broker_position_ids = {p.get("id") for p in open_positions if p.get("id")}
+        
+        async with async_session() as db:
+            open_db_trades = await crud.get_open_trades_by_external_id(db)
+            
+            # Fetch history only if there's a discrepancy
+            history = None
+            
+            for ext_id, trade in open_db_trades.items():
+                if ext_id not in broker_position_ids:
+                    logger.info(f"🔄 Reconciling closed trade: {trade.symbol} (ID: {ext_id})")
+                    
+                    if history is None:
+                        history = await broker.get_history(days=3)
+                        
+                    closed_deal = next((d for d in history if d.get("position_id") == ext_id), None)
+                    
+                    profit = 0.0
+                    close_price = 0.0
+                    
+                    if closed_deal:
+                        profit = closed_deal.get("profit", 0.0) + closed_deal.get("swap", 0.0) + closed_deal.get("commission", 0.0)
+                        close_price = closed_deal.get("price", 0.0)
+                        logger.info(f"  💰 Found closed deal for {trade.symbol}: Profit ${profit:.2f} at price {close_price}")
+                    else:
+                        logger.warning(f"  ❌ Could not find history deal for position {ext_id}. Marking as closed with 0 profit.")
+                        
+                    await crud.close_trade(db, trade.id, close_price, profit)
+                    await crud.update_decision_outcome(db, trade.id, profit > 0)
+                    
+            await db.commit()
+
+    def pause(self):
+        """Pauses the market watcher analysis loop."""
+        self.is_paused = True
+        logger.critical("🛑 EMERGENCY PAUSE TRIGGERED! Trading halted.")
+
+    def resume(self):
+        """Resumes the market watcher analysis loop."""
+        self.is_paused = False
+        logger.info("▶️ Trading Resumed.")
+
+    async def emergency_close_all(self):
+        """Closes all open positions and pauses the bot."""
+        self.pause()
+        logger.critical("🚨 EMERGENCY CLOSE ALL TRIGGERED! Closing all open positions...")
+        open_positions = await broker.get_positions()
+        for pos in open_positions:
+            try:
+                pos_id = pos.get("id")
+                symbol = pos.get("symbol")
+                if pos_id:
+                    logger.critical(f"Closing position {pos_id} for {symbol}...")
+                    res = await broker.close_position(pos_id)
+                    if not res.get("success"):
+                        logger.error(f"Failed to close position {pos_id}: {res.get('error')}")
+            except Exception as e:
+                logger.error(f"Error during emergency close of position {pos.get('id')}: {e}")
 
 # Global Instance
 watcher = MarketWatcher()

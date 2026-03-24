@@ -18,6 +18,7 @@ class RiskManager:
     def check_trade_allowed(
         self,
         symbol: str,
+        direction: str,
         account_info: Dict[str, Any],
         open_positions: List[Dict[str, Any]],
         daily_pnl: float,
@@ -37,10 +38,24 @@ class RiskManager:
             return {"allowed": False, "reason": f"Max open positions reached ({self.max_exposure})"}
 
         # Check 2: Already holding this currency pair?
-        symbols_held = [p["symbol"] for p in open_positions]
+        symbols_held = [p.get("symbol", "") for p in open_positions]
         if symbol in symbols_held:
             # Simple rule: 1 position per pair at a time max
             return {"allowed": False, "reason": f"Already holding {symbol}"}
+
+        # Check 2.5: Correlation exposure
+        base_ccy = symbol[:3]
+        quote_ccy = symbol[3:]
+        for p in open_positions:
+            s_held = p.get("symbol", "")
+            if len(s_held) >= 6:
+                held_base = s_held[:3]
+                held_quote = s_held[3:]
+                held_dir = "BUY" if "BUY" in str(p.get("type", "")).upper() else "SELL"
+                
+                # Same-direction exposure on same currency
+                if (base_ccy == held_base or quote_ccy == held_quote) and held_dir == direction:
+                    return {"allowed": False, "reason": f"Correlated exposure: already {held_dir} {s_held}"}
 
         # Check 3: Daily PNL Limit
         daily_pnl_pct = (daily_pnl / equity) * 100

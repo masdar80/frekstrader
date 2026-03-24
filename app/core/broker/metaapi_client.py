@@ -394,6 +394,7 @@ class MetaAPIClient:
             return [
                 {
                     "id": d.get("id", ""),
+                    "position_id": d.get("positionId", ""),
                     "symbol": d.get("symbol", ""),
                     "type": d.get("type", ""),
                     "volume": d.get("volume", 0),

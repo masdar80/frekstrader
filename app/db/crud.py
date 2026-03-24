@@ -2,7 +2,7 @@
 CRUD operations for database models.
 """
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,13 @@ async def create_trade(db: AsyncSession, **kwargs) -> Trade:
 async def get_open_trades(db: AsyncSession) -> List[Trade]:
     result = await db.execute(select(Trade).where(Trade.status == "open").order_by(desc(Trade.opened_at)))
     return result.scalars().all()
+
+
+async def get_open_trades_by_external_id(db: AsyncSession) -> Dict[str, Trade]:
+    """Returns a dict mapping external_id to open Trade objects."""
+    result = await db.execute(select(Trade).where(Trade.status == "open", Trade.external_id.isnot(None)))
+    trades = result.scalars().all()
+    return {t.external_id: t for t in trades}
 
 
 async def get_trade_history(db: AsyncSession, limit: int = 50) -> List[Trade]:
@@ -54,6 +61,14 @@ async def get_recent_decisions(db: AsyncSession, limit: int = 50) -> List[Decisi
     return result.scalars().all()
 
 
+async def update_decision_outcome(db: AsyncSession, trade_id: int, was_profitable: bool):
+    """Update was_profitable field on all decisions linked to a trade."""
+    result = await db.execute(select(Decision).where(Decision.trade_id == trade_id))
+    decisions = result.scalars().all()
+    for dec in decisions:
+        dec.was_profitable = was_profitable
+
+
 # === Signals ===
 
 async def create_signal(db: AsyncSession, **kwargs) -> Signal:
@@ -82,6 +97,16 @@ async def create_snapshot(db: AsyncSession, **kwargs) -> AccountSnapshot:
 async def get_latest_snapshot(db: AsyncSession) -> Optional[AccountSnapshot]:
     result = await db.execute(select(AccountSnapshot).order_by(desc(AccountSnapshot.timestamp)).limit(1))
     return result.scalar_one_or_none()
+
+
+async def get_equity_history(db: AsyncSession, hours: int = 24) -> List[AccountSnapshot]:
+    cutoff = utcnow() - timedelta(hours=hours)
+    result = await db.execute(
+        select(AccountSnapshot)
+        .where(AccountSnapshot.timestamp >= cutoff)
+        .order_by(AccountSnapshot.timestamp.asc())
+    )
+    return result.scalars().all()
 
 
 async def get_daily_pnl(db: AsyncSession) -> float:

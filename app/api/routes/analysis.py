@@ -26,3 +26,14 @@ async def get_chart_data(symbol: str, timeframe: str = "15m", limit: int = 200):
     """Get chart candles for the frontend."""
     candles = await broker.get_candles(symbol, timeframe=timeframe, count=limit)
     return {"symbol": symbol, "timeframe": timeframe, "candles": candles}
+
+@router.get("/sentiment/{symbol}")
+async def get_symbol_sentiment(symbol: str):
+    """Get the latest cached sentiment for a symbol."""
+    from app.workers.market_watcher import watcher
+    return watcher._sentiment_cache.get(symbol, {
+        "symbol": symbol, "signal": "NEUTRAL", "score": 0.0,
+        "strength": 0.0, "confidence": 0.0,
+        "reasoning": "Loading..."
+    })
+

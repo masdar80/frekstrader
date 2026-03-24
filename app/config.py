@@ -59,7 +59,10 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = 3.0
     max_weekly_loss_pct: float = 7.0
     max_open_positions: int = 3
+    max_drawdown_pct: float = 10.0
+    news_blackout_minutes: int = 30
     drawdown_circuit_breaker_pct: float = 10.0
+    max_slippage_pips: float = 3.0
 
     # === Server ===
     app_host: str = "0.0.0.0"

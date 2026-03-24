@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ForeksTrader | AI Skeptic Brain</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/styles.css">
     <!-- Font -->
@@ -60,6 +60,14 @@
                 </div>
             </div>
             
+            <!-- Emergency Stop -->
+            <button id="btn-emergency" class="w-auto px-4 h-10 rounded-xl bg-red-900/40 border border-red-800/80 hover:bg-red-800 text-red-400 hover:text-white transition-all flex items-center justify-center font-bold text-sm gap-2 shadow-lg shadow-red-900/20" onclick="emergencyStop()">
+                <i class="fa-solid fa-triangle-exclamation"></i> EMERGENCY STOP
+            </button>
+            <button id="btn-resume" class="w-auto px-4 h-10 rounded-xl bg-emerald-900/40 border border-emerald-800/80 hover:bg-emerald-800 text-emerald-400 hover:text-white transition-all flex items-center justify-center font-bold text-sm gap-2 shadow-lg shadow-emerald-900/20 hidden" onclick="resumeTrading()">
+                <i class="fa-solid fa-play"></i> RESUME TRADING
+            </button>
+            
             <!-- Quick Settings -->
             <button class="w-10 h-10 rounded-xl bg-panelbg2 border border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex items-center justify-center" onclick="toggleSettingsModal()">
                 <i class="fa-solid fa-sliders"></i>
@@ -102,7 +110,7 @@
             </div>
 
             <!-- Skeptical Brain Audit Log -->
-            <div class="glass-panel h-64 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden">
+            <div class="glass-panel h-80 rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col overflow-hidden">
                 <div class="h-10 border-b border-gray-800/60 flex items-center justify-between px-4 bg-panelbg2/50 shrink-0">
                     <div class="flex items-center gap-2">
                         <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
@@ -144,6 +152,25 @@
                     </div>
                 </div>
                 
+                <!-- Risk Meters -->
+                <div class="mt-2 mb-4 pt-4 border-t border-gray-800/60">
+                    <div class="text-xs text-gray-400 mb-1 flex justify-between">
+                        <span>Daily Loss Limit</span>
+                        <span id="risk-daily-text" class="text-gray-300 font-mono">0% / 3%</span>
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-1.5 mb-3 overflow-hidden">
+                        <div id="risk-daily-bar" class="bg-emerald-500 h-1.5 transition-all w-0"></div>
+                    </div>
+                    
+                    <div class="text-xs text-gray-400 mb-1 flex justify-between">
+                        <span>Drawdown Limit</span>
+                        <span id="risk-dd-text" class="text-gray-300 font-mono">0% / 10%</span>
+                    </div>
+                    <div class="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                        <div id="risk-dd-bar" class="bg-emerald-500 h-1.5 transition-all w-0"></div>
+                    </div>
+                </div>
+                
                 <!-- Trading Mode Badge -->
                 <div class="mt-4 pt-4 border-t border-gray-800/60 flex items-center justify-between">
                     <span class="text-sm text-gray-400">Trading Mode:</span>
@@ -176,7 +203,7 @@
             </div>
 
             <!-- Active Positions -->
-            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col flex-1 min-h-[250px]">
+            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col min-h-[250px]">
                 <div class="p-4 border-b border-gray-800/60 flex justify-between items-center">
                     <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
                         <i class="fa-solid fa-briefcase text-emerald-400"></i> Open Positions
@@ -187,6 +214,36 @@
                     <!-- Positions injected here -->
                     <div class="flex h-full items-center justify-center text-gray-500 text-sm italic">
                         No open positions. Brain is being skeptical.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Equity Curve -->
+            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col min-h-[200px]">
+                <div class="p-3 border-b border-gray-800/60 flex justify-between items-center bg-panelbg2/50">
+                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-line text-blue-400"></i> Equity Curve
+                    </h3>
+                    <div class="flex gap-1" id="equity-tf-selector">
+                        <button class="filter-btn active text-[10px] px-2 py-0.5" data-hours="24">24H</button>
+                        <button class="filter-btn text-[10px] px-2 py-0.5" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <div id="equity-chart" class="flex-1 w-full h-[160px] relative">
+                    <!-- Chart renders here -->
+                </div>
+            </div>
+
+            <!-- Trade History -->
+            <div class="glass-panel rounded-2xl border border-gray-800/60 bg-panelbg flex flex-col flex-1 min-h-[250px] mb-4">
+                <div class="p-3 border-b border-gray-800/60 flex justify-between items-center bg-panelbg2/50">
+                    <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> Trade History
+                    </h3>
+                </div>
+                <div class="flex-1 overflow-y-auto p-0 hidden-scrollbar" id="trade-history-list">
+                    <div class="flex h-full items-center justify-center text-gray-500 text-sm italic py-8">
+                        No closed trades yet.
                     </div>
                 </div>
             </div>
