@@ -164,7 +164,7 @@ async function fetchChartData(symbol, timeframe) {
 function initWebSocket() {
     try {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const host = window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname;
+        const host = window.location.hostname;
         const port = window.location.port || (protocol === "ws:" ? "80" : "443");
         const wsUrl = `${protocol}//${host}:${port}/ws`;
         
