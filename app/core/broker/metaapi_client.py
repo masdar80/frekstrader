@@ -407,14 +407,21 @@ class MetaAPIClient:
         """Get closed trade history."""
         if not self._connected:
             return []
+        
+        # MetaAPI prefers Z suffix and no microseconds sometimes, 
+        # but most reliably works with /history-deals and startTime/endTime params.
         start = datetime.now(timezone.utc) - timedelta(days=days)
+        start_str = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        end_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        
         data = await self._get(
-            "/history-deals/time",
+            "/history-deals",
             params={
-                "startTime": start.isoformat(),
-                "endTime": datetime.now(timezone.utc).isoformat()
+                "startTime": start_str,
+                "endTime": end_str
             }
         )
+        
         if data and isinstance(data, list):
             return [
                 {
@@ -422,6 +429,8 @@ class MetaAPIClient:
                     "position_id": d.get("positionId", ""),
                     "symbol": d.get("symbol", ""),
                     "type": d.get("type", ""),
+                    # entry_type: DEAL_ENTRY_IN, DEAL_ENTRY_OUT, etc.
+                    "entry_type": d.get("entry", ""), 
                     "volume": d.get("volume", 0),
                     "price": d.get("price", 0),
                     "profit": d.get("profit", 0),
@@ -432,6 +441,7 @@ class MetaAPIClient:
                 for d in data
             ]
         return []
+
 
     async def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
         """Get symbol specification (digits, lot size, etc.)."""

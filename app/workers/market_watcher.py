@@ -399,17 +399,28 @@ class MarketWatcher:
                     if history is None:
                         history = await broker.get_history(days=3)
                         
-                    closed_deal = next((d for d in history if d.get("position_id") == ext_id), None)
+                    # MT5: A position can have multiple deals (Entry In, Entry Out).
+                    # We must sum them all to get the true P&L.
+                    matching_deals = [d for d in history if d.get("position_id") == ext_id]
                     
                     profit = 0.0
                     close_price = 0.0
                     
-                    if closed_deal:
-                        profit = closed_deal.get("profit", 0.0) + closed_deal.get("swap", 0.0) + closed_deal.get("commission", 0.0)
-                        close_price = closed_deal.get("price", 0.0)
-                        logger.info(f"  💰 Found closed deal for {trade.symbol}: Profit ${profit:.2f} at price {close_price}")
+                    if matching_deals:
+                        for deal in matching_deals:
+                            profit += deal.get("profit", 0.0) + deal.get("swap", 0.0) + deal.get("commission", 0.0)
+                            # The close price is from the DEAL_ENTRY_OUT or DEAL_ENTRY_INOUT
+                            if deal.get("entry_type") in ["DEAL_ENTRY_OUT", "DEAL_ENTRY_INOUT"]:
+                                close_price = deal.get("price", 0.0)
+                        
+                        # Fallback for close price if deal entry type mapping is missing
+                        if close_price == 0.0:
+                            close_price = matching_deals[-1].get("price", 0.0)
+                            
+                        logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price}")
                     else:
                         logger.warning(f"  ❌ Could not find history deal for position {ext_id}. Marking as closed with 0 profit.")
+
                         
                     await crud.close_trade(db, trade.id, close_price, profit)
                     await crud.update_decision_outcome(db, trade.id, profit > 0)
