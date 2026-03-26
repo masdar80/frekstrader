@@ -135,6 +135,16 @@ async def get_weekly_pnl(db: AsyncSession) -> float:
     return result.scalar() or 0.0
 
 
+async def get_total_pnl(db: AsyncSession) -> float:
+    """Get total P&L for all time from closed trades."""
+    result = await db.execute(
+        select(func.sum(Trade.profit)).where(
+            Trade.status == "closed"
+        )
+    )
+    return result.scalar() or 0.0
+
+
 # === News ===
 
 async def create_news_event(db: AsyncSession, **kwargs) -> NewsEvent:

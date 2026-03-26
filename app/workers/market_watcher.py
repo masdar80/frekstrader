@@ -35,12 +35,14 @@ class MarketWatcher:
     def __init__(self):
         self.is_running = False
         self.is_paused = False
-        self.sleep_interval = 30          # Run every 30 seconds
+        self.sleep_interval = 60          # Run every 60 seconds (prevents 429)
         self.sentiment_interval = 900     # Refresh sentiment every 15 minutes
         self._last_sentiment_run = 0.0
         self._sentiment_cache: Dict[str, Dict[str, Any]] = {}
+        self._candle_cache: Dict[str, Dict[str, Any]] = {}
+        self._candle_cache_ttl = 300      # 5 minute candle cache
         self._peak_equity: float = 0.0    # Tracked persistently
-        self._broker_semaphore = asyncio.Semaphore(5)  # Max 5 concurrent broker requests
+        self._broker_semaphore = asyncio.Semaphore(3)  # Max 3 concurrent broker requests
 
     async def start(self):
         self.is_running = True
@@ -126,18 +128,20 @@ class MarketWatcher:
             await self._refresh_all_sentiment()
             self._last_sentiment_run = now
 
-        # 4. Process all pairs concurrently (each with its own DB session)
-        tasks = [
-            self._analyze_and_trade_symbol(
-                symbol, account_info, open_positions,
-                daily_pnl, weekly_pnl, self._peak_equity
-            )
-            for symbol in settings.pairs_list
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for symbol, result in zip(settings.pairs_list, results):
-            if isinstance(result, Exception):
-                logger.error(f"Error processing {symbol}: {result}")
+        # 4. Process all pairs SEQUENTIALLY with delays (to prevent 429)
+        for symbol in settings.pairs_list:
+            if not self.is_running or self.is_paused:
+                break
+                
+            try:
+                await self._analyze_and_trade_symbol(
+                    symbol, account_info, open_positions,
+                    daily_pnl, weekly_pnl, self._peak_equity
+                )
+                # Small stagger delay between symbols
+                await asyncio.sleep(2.0)
+            except Exception as e:
+                logger.error(f"Error processing {symbol}: {e}")
 
         logger.info("--- ✅ Analysis cycle complete ---")
 
@@ -160,25 +164,40 @@ class MarketWatcher:
         """The core pipeline for a single currency pair."""
         logger.info(f"🔎 Analyzing {symbol}...")
 
-        # 1. Fetch Market Data — rate limited
+        # 1. Fetch Market Data — use cache for candles
         async with self._broker_semaphore:
             current_price_data = await broker.get_price(symbol)
             if not current_price_data:
                 logger.warning(f"Failed to fetch current price for {symbol}")
                 return
 
-        async with self._broker_semaphore:
-            candle_tasks = {
-                tf: broker.get_candles(symbol, timeframe=tf, count=200)
-                for tf in technical_analyzer.TIMEFRAMES
-            }
-            candle_results = await asyncio.gather(*candle_tasks.values(), return_exceptions=True)
-            candles_by_tf = {}
-            for tf, result in zip(candle_tasks.keys(), candle_results):
-                if isinstance(result, list):
-                    candles_by_tf[tf] = result
-                else:
-                    logger.warning(f"Candle fetch failed for {symbol}/{tf}: {result}")
+        # Handle candle caching (only fetch if expired)
+        now = time.time()
+        cached_data = self._candle_cache.get(symbol)
+        
+        if cached_data and (now - cached_data["timestamp"] < self._candle_cache_ttl):
+            logger.info(f"  📦 Using cached candles for {symbol}")
+            candles_by_tf = cached_data["candles"]
+        else:
+            logger.info(f"  📥 Fetching fresh candles for {symbol}...")
+            async with self._broker_semaphore:
+                candle_tasks = {
+                    tf: broker.get_candles(symbol, timeframe=tf, count=200)
+                    for tf in technical_analyzer.TIMEFRAMES
+                }
+                candle_results = await asyncio.gather(*candle_tasks.values(), return_exceptions=True)
+                candles_by_tf = {}
+                for tf, result in zip(candle_tasks.keys(), candle_results):
+                    if isinstance(result, list):
+                        candles_by_tf[tf] = result
+                    else:
+                        logger.warning(f"Candle fetch failed for {symbol}/{tf}: {result}")
+                
+                # Update cache
+                self._candle_cache[symbol] = {
+                    "timestamp": now,
+                    "candles": candles_by_tf
+                }
 
         current_price = current_price_data["ask"]
         bid_price = current_price_data.get("bid", current_price)

@@ -26,6 +26,8 @@ class MetaAPIClient:
         self._base_url = ""
         self._market_data_url = ""  # Separate hostname for historical candles
         self._headers = {}
+        self._rate_limit_lock = asyncio.Lock()  # Global lock for rate limiting
+        self._last_request_time = 0.0
         
         # Caching to prevent UI timeouts during heavy background processing
         self._last_account_info = {"balance": 0, "equity": 0, "margin": 0, "free_margin": 0}
@@ -140,38 +142,54 @@ class MetaAPIClient:
         """Make a GET request with error handling and retry."""
         if not self._client:
             return None
-        url = f"{self._account_url}{path}"
-        for attempt in range(2):
-            try:
-                resp = await self._client.get(url, params=params)
-                if resp.status_code == 200:
-                    return resp.json()
-                elif resp.status_code == 504:
-                    logger.debug(f"Timeout on {path}, retrying...")
-                    await asyncio.sleep(3)
-                else:
-                    logger.warning(f"API {path} returned {resp.status_code}: {resp.text[:200]}")
-                    return None
-            except Exception as e:
-                logger.warning(f"API {path} error: {e}")
-                await asyncio.sleep(2)
+            
+        async with self._rate_limit_lock:
+            # Enforce at least 200ms between requests
+            elapsed = time.time() - self._last_request_time
+            if elapsed < 0.2:
+                await asyncio.sleep(0.2 - elapsed)
+            
+            url = f"{self._account_url}{path}"
+            for attempt in range(2):
+                try:
+                    resp = await self._client.get(url, params=params)
+                    self._last_request_time = time.time()
+                    if resp.status_code == 200:
+                        return resp.json()
+                    elif resp.status_code == 504:
+                        logger.debug(f"Timeout on {path}, retrying...")
+                        await asyncio.sleep(3)
+                    else:
+                        logger.warning(f"API {path} returned {resp.status_code}: {resp.text[:200]}")
+                        return None
+                except Exception as e:
+                    logger.warning(f"API {path} error: {e}")
+                    await asyncio.sleep(2)
         return None
 
     async def _post(self, path: str, json_data: dict = None) -> Optional[dict]:
         """Make a POST request with error handling."""
         if not self._client:
             return None
-        url = f"{self._account_url}{path}"
-        try:
-            resp = await self._client.post(url, json=json_data)
-            if resp.status_code in (200, 201):
-                return resp.json()
-            else:
-                logger.warning(f"API POST {path} returned {resp.status_code}: {resp.text[:200]}")
-                return {"error": resp.text[:200]}
-        except Exception as e:
-            logger.error(f"API POST {path} error: {e}")
-            return {"error": str(e)}
+            
+        async with self._rate_limit_lock:
+            # Enforce at least 200ms between requests
+            elapsed = time.time() - self._last_request_time
+            if elapsed < 0.2:
+                await asyncio.sleep(0.2 - elapsed)
+
+            url = f"{self._account_url}{path}"
+            try:
+                resp = await self._client.post(url, json=json_data)
+                self._last_request_time = time.time()
+                if resp.status_code in (200, 201):
+                    return resp.json()
+                else:
+                    logger.warning(f"API POST {path} returned {resp.status_code}: {resp.text[:200]}")
+                    return {"error": resp.text[:200]}
+            except Exception as e:
+                logger.error(f"API POST {path} error: {e}")
+                return {"error": str(e)}
 
     async def get_account_info(self, use_cache: bool = False) -> Dict[str, Any]:
         """Get account balance, equity, margin info. Uses cache on timeout or explicitly."""
@@ -254,33 +272,40 @@ class MetaAPIClient:
         market_data_account_url = f"{self._market_data_url}/users/current/accounts/{settings.metaapi_account_id}"
         url = f"{market_data_account_url}/historical-market-data/symbols/{symbol}/timeframes/{timeframe}/candles"
 
-        for attempt in range(2):
-            try:
-                resp = await self._client.get(url, params={"limit": count})
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return [
-                            {
-                                "time": c.get("time", ""),
-                                "open": c.get("open", 0),
-                                "high": c.get("high", 0),
-                                "low": c.get("low", 0),
-                                "close": c.get("close", 0),
-                                "volume": c.get("tickVolume", c.get("volume", 0)),
-                            }
-                            for c in data
-                        ]
-                    return []
-                elif resp.status_code == 504:
-                    logger.debug(f"Candle timeout for {symbol}/{timeframe}, retrying...")
-                    await asyncio.sleep(3)
-                else:
-                    logger.warning(f"Candle API {symbol}/{timeframe} returned {resp.status_code}: {resp.text[:200]}")
-                    return []
-            except Exception as e:
-                logger.warning(f"Candle fetch error {symbol}/{timeframe}: {e}")
-                await asyncio.sleep(2)
+        async with self._rate_limit_lock:
+            # Enforce at least 200ms between requests
+            elapsed = time.time() - self._last_request_time
+            if elapsed < 0.2:
+                await asyncio.sleep(0.2 - elapsed)
+
+            for attempt in range(2):
+                try:
+                    resp = await self._client.get(url, params={"limit": count})
+                    self._last_request_time = time.time()
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, list):
+                            return [
+                                {
+                                    "time": c.get("time", ""),
+                                    "open": c.get("open", 0),
+                                    "high": c.get("high", 0),
+                                    "low": c.get("low", 0),
+                                    "close": c.get("close", 0),
+                                    "volume": c.get("tickVolume", c.get("volume", 0)),
+                                }
+                                for c in data
+                            ]
+                        return []
+                    elif resp.status_code == 504:
+                        logger.debug(f"Candle timeout for {symbol}/{timeframe}, retrying...")
+                        await asyncio.sleep(3)
+                    else:
+                        logger.warning(f"Candle API {symbol}/{timeframe} returned {resp.status_code}: {resp.text[:200]}")
+                        return []
+                except Exception as e:
+                    logger.warning(f"Candle fetch error {symbol}/{timeframe}: {e}")
+                    await asyncio.sleep(2)
         return []
 
     async def get_price(self, symbol: str) -> Optional[Dict[str, float]]:

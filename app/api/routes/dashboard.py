@@ -22,6 +22,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     open_positions = await broker.get_positions(use_cache=True)
     daily_pnl = await crud.get_daily_pnl(db)
     weekly_pnl = await crud.get_weekly_pnl(db)
+    total_pnl = await crud.get_total_pnl(db)
     recent_decisions = await crud.get_recent_decisions(db, limit=10)
     
     decisions_list = []
@@ -45,6 +46,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
         "metrics": {
             "daily_pnl": daily_pnl,
             "weekly_pnl": weekly_pnl,
+            "total_pnl": total_pnl,
             "max_daily_loss": settings.max_daily_loss_pct,
             "risk_per_trade": settings.effective_max_risk_pct,
             "confidence_threshold": settings.confidence_threshold

@@ -268,10 +268,22 @@ function updateAccountUI(account, positions) {
 
 function updateDailyStats(metrics) {
     if (!metrics) return;
+    
+    // Daily P&L
     const pnl = metrics.daily_pnl || 0;
     const el = document.getElementById("nav-pnl");
-    el.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toLocaleString()}`;
-    el.className = pnl >= 0 ? "font-bold text-buytext" : "font-bold text-selltext";
+    if (el) {
+        el.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toLocaleString()}`;
+        el.className = pnl >= 0 ? "font-bold text-buytext" : "font-bold text-selltext";
+    }
+
+    // Total P&L (Holistic)
+    const totalPnl = metrics.total_pnl || 0;
+    const totalEl = document.getElementById("nav-total-pnl");
+    if (totalEl) {
+        totalEl.innerText = `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString()}`;
+        totalEl.className = totalPnl >= 0 ? "font-bold text-emerald-400" : "font-bold text-rose-500";
+    }
 }
 
 function renderPositions(positions) {
