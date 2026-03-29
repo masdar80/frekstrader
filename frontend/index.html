@@ -268,74 +268,115 @@
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
-        <div class="bg-panelbg border border-gray-700/60 rounded-2xl w-full max-w-md shadow-2xl transform scale-95 transition-transform duration-300 p-6">
-            <div class="flex justify-between items-center mb-6">
+        <div class="bg-panelbg border border-gray-700/60 rounded-2xl w-full max-w-md shadow-2xl transform scale-95 transition-transform duration-300 flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 border-b border-gray-800/60 flex justify-between items-center shrink-0">
                 <h2 class="text-xl font-bold text-white">Aggression Settings</h2>
-                <button onclick="toggleSettingsModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+                <button onclick="toggleSettingsModal()" class="text-gray-400 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
             </div>
             
-            <div class="mb-6">
-                <label class="block text-sm font-medium text-gray-400 mb-3">Skeptical Brain Mode</label>
-                <input type="range" id="mode-slider" min="0" max="4" step="1" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-accent">
-                
-                <div class="flex justify-between text-xs text-gray-500 mt-2 font-medium">
-                    <span>Ultra Cons.</span>
-                    <span>Cons.</span>
-                    <span>Bal.</span>
-                    <span>Aggr.</span>
-                    <span>Ultra Aggr.</span>
-                </div>
-            </div>
-
-            <div class="bg-panelbg2 rounded-xl p-4 border border-gray-800 mb-6">
-                <h4 id="mode-title" class="font-bold text-accent mb-2">Balanced</h4>
-                <p id="mode-desc" class="text-sm text-gray-400 mb-4">Requires 3+ indicators to agree. Medium position sizing.</p>
-                <div class="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                        <span class="text-gray-500 block text-xs">Threshold</span>
-                        <span id="mode-thresh" class="font-bold text-gray-300">> 0.65</span>
-                    </div>
-                    <div>
-                        <span class="text-gray-500 block text-xs">Max Risk</span>
-                        <span id="mode-risk" class="font-bold text-gray-300">1.5%</span>
+            <div class="flex-1 overflow-y-auto px-6 py-6 space-y-6 hidden-scrollbar">
+                <!-- Skeptical Slider -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-3">Skeptical Brain Mode</label>
+                    <input type="range" id="mode-slider" min="0" max="4" step="1" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-accent">
+                    <div class="flex justify-between text-xs text-gray-500 mt-2 font-medium">
+                        <span>Ultra Cons.</span>
+                        <span>Cons.</span>
+                        <span>Bal.</span>
+                        <span>Aggr.</span>
+                        <span>Ultra Aggr.</span>
                     </div>
                 </div>
-            </div>
 
-            <div class="mb-6">
-                <label class="block text-sm font-medium text-gray-400 mb-2">Max Risk Per Trade ($)</label>
-                <div class="relative">
-                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
-                    <input type="number" id="max-risk-amount" min="1" step="0.5" class="w-full bg-panelbg2 border border-gray-800 rounded-xl py-2.5 pl-8 pr-4 text-white font-bold focus:ring-1 focus:ring-accent focus:border-accent outline-none transition-all" value="20.0">
+                <!-- Mode Info -->
+                <div class="bg-panelbg2 rounded-xl p-4 border border-gray-800">
+                    <h4 id="mode-title" class="font-bold text-accent mb-2">Balanced</h4>
+                    <p id="mode-desc" class="text-sm text-gray-400 mb-4">Requires 3+ indicators to agree. Medium position sizing.</p>
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-500 block text-xs">Threshold</span>
+                            <span id="mode-thresh" class="font-bold text-gray-300">> 0.65</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500 block text-xs">Max Risk</span>
+                            <span id="mode-risk" class="font-bold text-gray-300">1.5%</span>
+                        </div>
+                    </div>
                 </div>
-                <p class="text-[10px] text-gray-500 mt-1.5 px-1 italic">Hard cap on dollar loss per trade, regardless of % risk.</p>
-            </div>
 
-            <div class="flex items-center justify-between mb-4 p-3 bg-panelbg2 rounded-xl border border-gray-800">
+                <!-- Pairs Selection -->
+                <div class="p-4 bg-panelbg2 rounded-xl border border-gray-800">
+                    <label class="block text-xs font-bold text-gray-400 uppercase mb-3 flex justify-between items-center">
+                        <span>Live Trading Pairs</span>
+                        <button class="text-accent hover:underline text-[10px]" onclick="selectAllLivePairs()">Select All</button>
+                    </label>
+                    <div class="grid grid-cols-2 gap-2" id="live-pairs-grid">
+                        <label class="flex items-center gap-2 p-2 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                            <input type="checkbox" name="live-pair" value="EURUSD" checked class="accent-accent">
+                            <span class="text-xs font-bold text-gray-300">EURUSD</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                            <input type="checkbox" name="live-pair" value="GBPUSD" checked class="accent-accent">
+                            <span class="text-xs font-bold text-gray-300">GBPUSD</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                            <input type="checkbox" name="live-pair" value="USDJPY" checked class="accent-accent">
+                            <span class="text-xs font-bold text-gray-300">USDJPY</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                            <input type="checkbox" name="live-pair" value="AUDUSD" checked class="accent-accent">
+                            <span class="text-xs font-bold text-gray-300">AUDUSD</span>
+                        </label>
+                        <label class="flex items-center gap-2 p-2 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                            <input type="checkbox" name="live-pair" value="USDCHF" checked class="accent-accent">
+                            <span class="text-xs font-bold text-gray-300">USDCHF</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Risk Field -->
                 <div>
-                    <span class="block text-sm font-bold text-gray-300">Trailing Stop Loss</span>
-                    <span class="text-xs text-gray-500">Lock in profits with automated ATR trailing</span>
+                    <label class="block text-sm font-medium text-gray-400 mb-2">Max Risk Per Trade ($)</label>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                        <input type="number" id="max-risk-amount" min="1" step="0.5" class="w-full bg-panelbg2 border border-gray-800 rounded-xl py-2.5 pl-8 pr-4 text-white font-bold focus:ring-1 focus:ring-accent focus:border-accent outline-none transition-all" value="20.0">
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-1.5 px-1 italic">Hard cap on dollar loss per trade, regardless of % risk.</p>
                 </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" id="trailing-toggle" class="sr-only peer" checked>
-                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 hover:after:scale-110"></div>
-                </label>
+
+                <!-- Toggles -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between p-3 bg-panelbg2 rounded-xl border border-gray-800">
+                        <div>
+                            <span class="block text-sm font-bold text-gray-300">Trailing Stop Loss</span>
+                            <span class="text-xs text-gray-500">Lock in profits with ATR trailing</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="trailing-toggle" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+
+                    <div class="flex items-center justify-between p-3 bg-panelbg2 rounded-xl border border-gray-800">
+                        <div>
+                            <span class="block text-sm font-bold text-gray-300">AI Sentiment Layer</span>
+                            <span class="text-xs text-gray-500">Filter trades with AI news</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ai-toggle" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                        </label>
+                    </div>
+                </div>
             </div>
 
-            <div class="flex items-center justify-between mb-8 p-3 bg-panelbg2 rounded-xl border border-gray-800">
-                <div>
-                    <span class="block text-sm font-bold text-gray-300">AI Sentiment Layer</span>
-                    <span class="text-xs text-gray-500">Isolate trades from AI news & sentiment</span>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" id="ai-toggle" class="sr-only peer" checked>
-                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent hover:after:scale-110"></div>
-                </label>
+            <div class="px-6 py-4 border-t border-gray-800/60 shrink-0 bg-panelbg2/30 rounded-b-2xl">
+                <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-accent/20">
+                    APPLY CHANGES
+                </button>
             </div>
-
-            <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors shadow-lg shadow-accent/20">
-                Apply Trading Mode
-            </button>
         </div>
     </div>
 
@@ -397,14 +438,32 @@
                 <!-- Controls -->
                 <div class="col-span-4 space-y-4">
                     <div class="bg-panelbg2 p-4 rounded-xl border border-gray-800">
-                        <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Symbol</label>
-                        <select id="bt-symbol" class="w-full bg-darkbg border border-gray-700 rounded-lg p-2 text-white text-sm outline-none focus:border-purple-500">
-                            <option value="EURUSD">EURUSD</option>
-                            <option value="GBPUSD">GBPUSD</option>
-                            <option value="USDJPY">USDJPY</option>
-                            <option value="AUDUSD">AUDUSD</option>
-                            <option value="USDCHF">USDCHF</option>
-                        </select>
+                        <label class="block text-xs font-bold text-gray-400 uppercase mb-3 flex justify-between items-center">
+                            <span>Select Pairs</span>
+                            <button class="text-purple-400 hover:underline text-[10px]" onclick="selectAllBacktestPairs()">Select All</button>
+                        </label>
+                        <div class="grid grid-cols-2 gap-2" id="bt-pairs-grid">
+                            <label class="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                                <input type="checkbox" name="bt-pair" value="EURUSD" checked class="accent-purple-500">
+                                <span class="text-[11px] font-bold text-gray-400">EURUSD</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                                <input type="checkbox" name="bt-pair" value="GBPUSD" class="accent-purple-500">
+                                <span class="text-[11px] font-bold text-gray-400">GBPUSD</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                                <input type="checkbox" name="bt-pair" value="USDJPY" class="accent-purple-500">
+                                <span class="text-[11px] font-bold text-gray-400">USDJPY</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                                <input type="checkbox" name="bt-pair" value="AUDUSD" class="accent-purple-500">
+                                <span class="text-[11px] font-bold text-gray-400">AUDUSD</span>
+                            </label>
+                            <label class="flex items-center gap-2 p-1.5 rounded bg-black/20 border border-gray-800 cursor-pointer hover:bg-black/30 transition-colors">
+                                <input type="checkbox" name="bt-pair" value="USDCHF" class="accent-purple-500">
+                                <span class="text-[11px] font-bold text-gray-400">USDCHF</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="bg-panelbg2 p-4 rounded-xl border border-gray-800">
                         <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Duration (Days)</label>

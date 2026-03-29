@@ -561,6 +561,14 @@ async function saveSettings() {
     const trailingEnabled = document.getElementById("trailing-toggle").checked;
     const maxRiskAmount = parseFloat(document.getElementById("max-risk-amount").value) || 20.0;
     
+    // Collect active live pairs
+    const pairs = Array.from(document.querySelectorAll('input[name="live-pair"]:checked')).map(cb => cb.value);
+    
+    if (pairs.length === 0) {
+        alert("Please select at least one pair for live trading.");
+        return;
+    }
+
     try {
         const res = await fetch("/api/settings/mode", {
             method: "PUT",
@@ -569,7 +577,8 @@ async function saveSettings() {
                 mode: mode, 
                 use_ai_sentiment: useAI,
                 max_risk_amount_usd: maxRiskAmount,
-                trailing_stop_enabled: trailingEnabled
+                trailing_stop_enabled: trailingEnabled,
+                pairs: pairs
             })
         });
         
@@ -614,6 +623,13 @@ async function fetchSettings() {
             const riskField = document.getElementById("max-risk-amount");
             if (riskField) {
                 riskField.value = data.max_risk_amount_usd || 20.0;
+            }
+
+            // Sync Live Pairs Checkboxes
+            if (data.pairs) {
+                document.querySelectorAll('input[name="live-pair"]').forEach(cb => {
+                    cb.checked = data.pairs.includes(cb.value);
+                });
             }
 
             // Sync slider
@@ -1193,9 +1209,27 @@ function toggleBacktestModal() {
     }
 }
 
+function selectAllBacktestPairs() {
+    const boxes = document.querySelectorAll('input[name="bt-pair"]');
+    const allChecked = Array.from(boxes).every(b => b.checked);
+    boxes.forEach(b => b.checked = !allChecked);
+}
+
+function selectAllLivePairs() {
+    const boxes = document.querySelectorAll('input[name="live-pair"]');
+    const allChecked = Array.from(boxes).every(b => b.checked);
+    boxes.forEach(b => b.checked = !allChecked);
+}
+
 async function runBacktest() {
-    const symbol = document.getElementById("bt-symbol").value;
+    const symbols = Array.from(document.querySelectorAll('input[name="bt-pair"]:checked')).map(cb => cb.value);
     const days = parseInt(document.getElementById("bt-days").value);
+    
+    if (symbols.length === 0) {
+        alert("Please select at least one pair for backtesting.");
+        return;
+    }
+    
     const btn = document.getElementById("btn-run-bt");
     
     // UI State: Loading
@@ -1209,7 +1243,7 @@ async function runBacktest() {
         const res = await fetch("/api/backtest/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ symbol, days })
+            body: JSON.stringify({ symbols, days })
         });
         
         if (res.ok) {
