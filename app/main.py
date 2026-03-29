@@ -10,11 +10,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from sqlalchemy import text
 from app.config import settings
 from app.db.database import engine, Base
 from app.api.routes import trading, analysis, dashboard, backtest, settings as settings_routes, emergency
 from app.api.websocket import router as ws_router, broadcast_market_data
 from app.workers.market_watcher import watcher
+from app.core.broker.metaapi_client import broker
 from app.utils.logger import logger
 
 
@@ -42,7 +44,27 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"   Failed to save API key to .env: {e}")
 
-    # Create DB tables
+    # 1. Database Health Check
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+            logger.info("   DB Connection: OK")
+    except Exception as e:
+        logger.error(f"❌ Database connection failed: {e}")
+        # In production, we might want to exit here
+    
+    # 2. Broker Connection Check
+    try:
+        if not broker.is_connected:
+            success = await broker.connect()
+            if success:
+                logger.info("   Broker Connection: OK")
+            else:
+                logger.error("❌ Broker connection failed on startup")
+    except Exception as e:
+        logger.error(f"❌ Broker initialization error: {e}")
+
+    # 3. Create DB tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

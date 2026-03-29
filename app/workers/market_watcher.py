@@ -22,6 +22,7 @@ from app.core.analysis.calendar import economic_calendar
 from app.core.brain.decision_engine import decision_engine
 from app.core.risk.manager import risk_manager
 from app.core.risk.position_sizer import position_sizer
+from app.core.risk.trailing_manager import trailing_manager
 from app.api.websocket import manager as ws_manager
 from app.utils.helpers import utcnow
 
@@ -97,6 +98,14 @@ class MarketWatcher:
         account_info = await broker.get_account_info()
         open_positions = await broker.get_positions()
 
+        # 1.1. Fetch all current prices to build cross_rates table for position sizing
+        cross_rates = {}
+        async with self._broker_semaphore:
+            for p_symbol in settings.pairs_list:
+                p_data = await broker.get_price(p_symbol)
+                if p_data:
+                    cross_rates[p_symbol] = p_data["ask"]
+        
         # 1.5. Reconcile broker positions with DB open trades to detect closures
         await self._reconcile_positions(open_positions)
 
@@ -142,7 +151,8 @@ class MarketWatcher:
             try:
                 await self._analyze_and_trade_symbol(
                     symbol, account_info, open_positions,
-                    daily_pnl, weekly_pnl, self._peak_equity
+                    daily_pnl, weekly_pnl, self._peak_equity,
+                    cross_rates
                 )
                 # Small stagger delay between symbols
                 await asyncio.sleep(2.0)
@@ -150,6 +160,11 @@ class MarketWatcher:
                 logger.error(f"Error processing {symbol}: {e}")
 
         logger.info("--- ✅ Analysis cycle complete ---")
+        
+        # 5. Trailing Stop Loss Management (Phase 2)
+        if open_positions:
+            logger.info(f"📈 Checking trailing stops for {len(open_positions)} positions...")
+            await trailing_manager.update_trailing_stops(open_positions, self._candle_cache)
 
     async def _refresh_all_sentiment(self):
         """Fetch fresh sentiment for all currencies (runs every 15 min)."""
@@ -165,7 +180,8 @@ class MarketWatcher:
 
     async def _analyze_and_trade_symbol(
         self, symbol: str, account_info, open_positions,
-        daily_pnl, weekly_pnl, peak_equity
+        daily_pnl, weekly_pnl, peak_equity,
+        cross_rates: Dict[str, float]
     ):
         """The core pipeline for a single currency pair."""
         logger.info(f"🔎 Analyzing {symbol}...")
@@ -287,11 +303,16 @@ class MarketWatcher:
                             atr_val = 0.0015
                             if "ATR" in ta_raw_results and ta_raw_results["ATR"]:
                                 atr_val = ta_raw_results["ATR"][-1].value
+                            
+                            # Update cache with latest ATR for the Trailing Manager
+                            if symbol in self._candle_cache:
+                                self._candle_cache[symbol]["atr"] = atr_val
 
                             # Calculate Size
                             size_data = position_sizer.calculate(
                                 symbol, decision.action, current_price, account_info["equity"],
-                                atr_val, symbol_info, decision.confidence
+                                atr_val, symbol_info, decision.confidence,
+                                cross_rates
                             )
 
                             if size_data["allowed"]:
@@ -424,12 +445,22 @@ class MarketWatcher:
                             close_price = matching_deals[-1].get("price", 0.0)
                             
                         logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price}")
-                    else:
-                        logger.warning(f"  ❌ Could not find history deal for position {ext_id}. Marking as closed with 0 profit.")
-
                         
-                    await crud.close_trade(db, trade.id, close_price, profit)
-                    await crud.update_decision_outcome(db, trade.id, profit > 0)
+                        await crud.close_trade(db, trade.id, close_price, profit)
+                        await crud.update_decision_outcome(db, trade.id, profit > 0)
+                    else:
+                        # Phase 1.5: Retry logic for missing history deals
+                        retry_count = trade.metadata_json.get("reconcile_retries", 0) if trade.metadata_json else 0
+                        if retry_count < 10:
+                            logger.warning(f"  ⏳ No deals found for {trade.symbol} (pos:{ext_id}) yet. Retry {retry_count+1}/10...")
+                            # Update metadata with retry count
+                            new_metadata = dict(trade.metadata_json or {})
+                            new_metadata["reconcile_retries"] = retry_count + 1
+                            await crud.update_trade_metadata(db, trade.id, new_metadata)
+                        else:
+                            logger.error(f"  ❌ Exhausted retries for {trade.symbol} (pos:{ext_id}). Marking as closed with 0 profit.")
+                            await crud.close_trade(db, trade.id, 0.0, 0.0)
+                            await crud.update_decision_outcome(db, trade.id, False)
                     
             await db.commit()
 

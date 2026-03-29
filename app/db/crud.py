@@ -47,6 +47,15 @@ async def close_trade(db: AsyncSession, trade_id: int, close_price: float, profi
     return trade
 
 
+async def update_trade_metadata(db: AsyncSession, trade_id: int, metadata: Dict[str, Any]) -> Optional[Trade]:
+    """Update the metadata_json field of a trade."""
+    result = await db.execute(select(Trade).where(Trade.id == trade_id))
+    trade = result.scalar_one_or_none()
+    if trade:
+        trade.metadata_json = metadata
+    return trade
+
+
 # === Decisions ===
 
 async def create_decision(db: AsyncSession, **kwargs) -> Decision:

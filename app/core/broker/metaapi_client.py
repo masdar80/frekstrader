@@ -139,57 +139,73 @@ class MetaAPIClient:
         return f"{self._base_url}/users/current/accounts/{settings.metaapi_account_id}"
 
     async def _get(self, path: str, params: dict = None) -> Optional[dict]:
-        """Make a GET request with error handling and retry."""
+        """Make a GET request with exponential backoff retry."""
         if not self._client:
             return None
             
-        async with self._rate_limit_lock:
-            # Enforce at least 200ms between requests
-            elapsed = time.time() - self._last_request_time
-            if elapsed < 0.2:
-                await asyncio.sleep(0.2 - elapsed)
-            
-            url = f"{self._account_url}{path}"
-            for attempt in range(2):
+        url = f"{self._account_url}{path}"
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            async with self._rate_limit_lock:
+                # Enforce at least 200ms between requests
+                elapsed = time.time() - self._last_request_time
+                if elapsed < 0.2:
+                    await asyncio.sleep(0.2 - elapsed)
+                
                 try:
                     resp = await self._client.get(url, params=params)
                     self._last_request_time = time.time()
+                    
                     if resp.status_code == 200:
                         return resp.json()
-                    elif resp.status_code == 504:
-                        logger.debug(f"Timeout on {path}, retrying...")
-                        await asyncio.sleep(3)
+                    elif resp.status_code in (429, 500, 502, 503, 504):
+                        # Exponential backoff: 2s, 4s, 8s with jitter
+                        wait = (2 ** (attempt + 1)) + (time.time() % 1)
+                        logger.warning(f"⚠️ API {path} {resp.status_code}. Retrying in {wait:.1f}s... ({attempt+1}/{max_retries})")
+                        await asyncio.sleep(wait)
                     else:
-                        logger.warning(f"API {path} returned {resp.status_code}: {resp.text[:200]}")
+                        logger.warning(f"❌ API {path} returned {resp.status_code}: {resp.text[:200]}")
                         return None
                 except Exception as e:
-                    logger.warning(f"API {path} error: {e}")
-                    await asyncio.sleep(2)
+                    wait = (2 ** (attempt + 1)) + (time.time() % 1)
+                    logger.warning(f"⚠️ API {path} error: {e}. Retrying in {wait:.1f}s...")
+                    await asyncio.sleep(wait)
         return None
 
     async def _post(self, path: str, json_data: dict = None) -> Optional[dict]:
-        """Make a POST request with error handling."""
+        """Make a POST request with retry on temporary failures."""
         if not self._client:
             return None
             
-        async with self._rate_limit_lock:
-            # Enforce at least 200ms between requests
-            elapsed = time.time() - self._last_request_time
-            if elapsed < 0.2:
-                await asyncio.sleep(0.2 - elapsed)
-
-            url = f"{self._account_url}{path}"
-            try:
-                resp = await self._client.post(url, json=json_data)
-                self._last_request_time = time.time()
-                if resp.status_code in (200, 201):
-                    return resp.json()
-                else:
-                    logger.warning(f"API POST {path} returned {resp.status_code}: {resp.text[:200]}")
-                    return {"error": resp.text[:200]}
-            except Exception as e:
-                logger.error(f"API POST {path} error: {e}")
-                return {"error": str(e)}
+        url = f"{self._account_url}{path}"
+        max_retries = 2
+        
+        for attempt in range(max_retries):
+            async with self._rate_limit_lock:
+                elapsed = time.time() - self._last_request_time
+                if elapsed < 0.2:
+                    await asyncio.sleep(0.2 - elapsed)
+    
+                try:
+                    resp = await self._client.post(url, json=json_data)
+                    self._last_request_time = time.time()
+                    if resp.status_code in (200, 201):
+                        return resp.json()
+                    elif resp.status_code == 429:
+                        wait = 5.0 + (attempt * 5)
+                        logger.warning(f"⚠️ Rate limited on POST {path}. Retrying in {wait}s...")
+                        await asyncio.sleep(wait)
+                    else:
+                        logger.warning(f"❌ API POST {path} returned {resp.status_code}: {resp.text[:200]}")
+                        return {"error": resp.text[:200]}
+                except Exception as e:
+                    logger.error(f"⚠️ API POST {path} error: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2)
+                    else:
+                        return {"error": str(e)}
+        return {"error": "Max retries exceeded"}
 
     async def get_account_info(self, use_cache: bool = False) -> Dict[str, Any]:
         """Get account balance, equity, margin info. Uses cache on timeout or explicitly."""

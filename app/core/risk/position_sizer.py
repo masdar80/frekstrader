@@ -20,7 +20,8 @@ class PositionSizer:
         account_equity: float,
         atr_value: float,
         symbol_info: Dict[str, Any],
-        confidence: float
+        confidence: float,
+        cross_rates: Dict[str, float] = None
     ) -> Dict[str, Any]:
         """
         Calculate Lot Size, Stop Loss, and Take Profit.
@@ -39,6 +40,9 @@ class PositionSizer:
         risk_pct = base_risk_pct * conf_multiplier
         
         risk_amount = account_equity * (risk_pct / 100.0)
+        
+        # Phase 1.3: Apply hard cap on risk amount
+        risk_amount = min(risk_amount, settings.max_risk_amount_usd)
         
         # 1. Calculate Stop Loss distance using ATR (Average True Range)
         # Using 1.5x ATR for Stop Loss to avoid noise triggering
@@ -72,12 +76,22 @@ class PositionSizer:
                 # 1000 JPY / 150.0 = 6.66 USD
                 tick_value_usd = tick_value_quote / current_price
             else:
-                # E.g., EURGBP. Tick is in GBP. Need GBPUSD rate.
-                # For simplicity, if we don't have the exact cross rate,
-                # we approximate or assume it's roughly 1.0-1.3 for majors
-                # In a full system, you'd fetch the GBPUSD price here.
-                # We'll use a rough fallback if not JPY and not USD quote.
-                tick_value_usd = tick_value_quote * 1.25
+                # Phase 1.1: Use real-time cross rates instead of hardcoded 1.25
+                rate_found = False
+                cross_rates = cross_rates or {}
+                
+                # Try direct: e.g. GBPUSD
+                if f"{quote_ccy}USD" in cross_rates:
+                    tick_value_usd = tick_value_quote * cross_rates[f"{quote_ccy}USD"]
+                    rate_found = True
+                # Try inverse: e.g. USDCHF (where CHF is quote, we need CHFUSD = 1/USDCHF)
+                elif f"USD{quote_ccy}" in cross_rates:
+                    tick_value_usd = tick_value_quote / cross_rates[f"USD{quote_ccy}"]
+                    rate_found = True
+                
+                if not rate_found:
+                    logger.error(f"Cannot convert {quote_ccy} to USD — no cross rate in {list(cross_rates.keys())}")
+                    return {"allowed": False, "reason": f"No cross rate for {quote_ccy}USD"}
 
         # How many points is the stop loss?
         sl_points = sl_distance / point_value

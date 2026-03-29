@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     news_blackout_minutes: int = 30
     drawdown_circuit_breaker_pct: float = 10.0
     max_slippage_pips: float = 3.0
+    max_risk_amount_usd: float = 20.0  # Phase 1.3: Hard cap on trade loss
+
+    # === Trailing Stop Loss (Phase 2) ===
+    trailing_stop_enabled: bool = True
+    trailing_breakeven_atr_mult: float = 1.0  # Move SL to breakeven at 1.0x ATR profit
+    trailing_atr_mult: float = 1.5           # Trail behind price at 1.5x ATR distance
 
     # === Server ===
     app_host: str = "0.0.0.0"

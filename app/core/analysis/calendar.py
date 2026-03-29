@@ -61,8 +61,18 @@ class EconomicCalendar:
         await self.fetch_events()
         
         if not self._events_cache:
-            # If we failed to fetch calendar, we assume safe (fail-open) to avoid completely breaking the bot
-            return {"safe": True, "reason": "No calendar data", "upcoming_event": None}
+            # Phase 1.4: Fail-closed policy
+            if self._last_fetch > 0:
+                # We have fetched before, but current cache is empty (failed refresh)
+                # Block for safety during potential high-impact news spikes
+                return {
+                    "safe": False, 
+                    "reason": "Calendar data stale — blocking for safety", 
+                    "upcoming_event": "STALE_DATA_PROTECTION"
+                }
+            else:
+                # First startup or never successfully fetched — allow trading but log warning
+                return {"safe": True, "reason": "No calendar data (initial startup)", "upcoming_event": None}
             
         now_utc = datetime.now(timezone.utc)
         blackout_delta = timedelta(minutes=settings.news_blackout_minutes)

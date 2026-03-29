@@ -17,6 +17,8 @@ router = APIRouter()
 class ModeUpdate(BaseModel):
     mode: str
     use_ai_sentiment: bool = True
+    max_risk_amount_usd: float = 20.0
+    trailing_stop_enabled: bool = True
 
 class HourConfig(BaseModel):
     day_of_week: int
@@ -38,18 +40,24 @@ async def update_trading_mode(req: ModeUpdate):
     # Update in memory
     settings.trading_mode = new_mode
     settings.use_ai_sentiment = req.use_ai_sentiment
+    settings.max_risk_amount_usd = req.max_risk_amount_usd
+    settings.trailing_stop_enabled = req.trailing_stop_enabled
     
     # Ideally save to .env to persist across restarts
     dotenv_file = dotenv.find_dotenv()
     if dotenv_file:
         dotenv.set_key(dotenv_file, "TRADING_MODE", new_mode.value)
         dotenv.set_key(dotenv_file, "USE_AI_SENTIMENT", "true" if req.use_ai_sentiment else "false")
+        dotenv.set_key(dotenv_file, "MAX_RISK_AMOUNT_USD", str(req.max_risk_amount_usd))
+        dotenv.set_key(dotenv_file, "TRAILING_STOP_ENABLED", "true" if req.trailing_stop_enabled else "false")
         
     return {
         "success": True, 
         "mode": settings.trading_mode.value,
         "new_threshold": settings.confidence_threshold,
-        "new_risk": settings.effective_max_risk_pct
+        "new_risk": settings.effective_max_risk_pct,
+        "max_risk_amount_usd": settings.max_risk_amount_usd,
+        "trailing_stop_enabled": settings.trailing_stop_enabled
     }
 
 @router.get("/")
@@ -61,7 +69,9 @@ async def get_settings():
         "max_risk_pct": settings.max_risk_per_trade_pct,
         "daily_limit": settings.max_daily_loss_pct,
         "effective_risk": settings.effective_max_risk_pct,
-        "threshold": settings.confidence_threshold
+        "threshold": settings.confidence_threshold,
+        "max_risk_amount_usd": settings.max_risk_amount_usd,
+        "trailing_stop_enabled": settings.trailing_stop_enabled
     }
 
 

@@ -558,12 +558,19 @@ async function saveSettings() {
     const index = slider.value;
     const mode = modeMetadata[index].value;
     const useAI = document.getElementById("ai-toggle").checked;
+    const trailingEnabled = document.getElementById("trailing-toggle").checked;
+    const maxRiskAmount = parseFloat(document.getElementById("max-risk-amount").value) || 20.0;
     
     try {
         const res = await fetch("/api/settings/mode", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: mode, use_ai_sentiment: useAI })
+            body: JSON.stringify({ 
+                mode: mode, 
+                use_ai_sentiment: useAI,
+                max_risk_amount_usd: maxRiskAmount,
+                trailing_stop_enabled: trailingEnabled
+            })
         });
         
         if (res.ok) {
@@ -595,6 +602,18 @@ async function fetchSettings() {
             if (aiToggle) {
                 aiToggle.checked = data.use_ai_sentiment;
                 updateAISettingsUI(data.use_ai_sentiment);
+            }
+
+            // Sync Trailing toggle
+            const trailingToggle = document.getElementById("trailing-toggle");
+            if (trailingToggle) {
+                trailingToggle.checked = data.trailing_stop_enabled;
+            }
+
+            // Sync Max Risk Amount
+            const riskField = document.getElementById("max-risk-amount");
+            if (riskField) {
+                riskField.value = data.max_risk_amount_usd || 20.0;
             }
 
             // Sync slider
@@ -1151,5 +1170,135 @@ async function saveWorkingHours() {
     } catch (e) {
         console.error("Save error:", e);
         alert("Network error while saving.");
+    }
+}
+// --- Backtest Logic (Phase 4) ---
+
+let btChart;
+let btSeries;
+
+function toggleBacktestModal() {
+    const modal = document.getElementById("backtest-modal");
+    if (!modal) return;
+    
+    if (modal.classList.contains("hidden")) {
+        modal.classList.remove("hidden");
+        modal.offsetWidth;
+        modal.classList.remove("opacity-0");
+        modal.querySelector('.bg-panelbg').classList.remove("scale-95");
+    } else {
+        modal.classList.add("opacity-0");
+        modal.querySelector('.bg-panelbg').classList.add("scale-95");
+        setTimeout(() => modal.classList.add("hidden"), 300);
+    }
+}
+
+async function runBacktest() {
+    const symbol = document.getElementById("bt-symbol").value;
+    const days = parseInt(document.getElementById("bt-days").value);
+    const btn = document.getElementById("btn-run-bt");
+    
+    // UI State: Loading
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Running...`;
+    document.getElementById("bt-placeholder").classList.add("hidden");
+    document.getElementById("bt-results").classList.add("hidden");
+    document.getElementById("bt-loading").classList.remove("hidden");
+    
+    try {
+        const res = await fetch("/api/backtest/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ symbol, days })
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            renderBacktestResults(data);
+        } else {
+            alert("Backtest failed. Check server logs.");
+        }
+    } catch (e) {
+        console.error("Backtest Error:", e);
+        alert("Network error during backtest.");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fa-solid fa-play"></i> START SIMULATION`;
+        document.getElementById("bt-loading").classList.add("hidden");
+    }
+}
+
+function renderBacktestResults(data) {
+    document.getElementById("bt-results").classList.remove("hidden");
+    
+    // Summary
+    document.getElementById("bt-winrate").innerText = `${data.summary.win_rate}%`;
+    document.getElementById("bt-profit").innerText = `${data.summary.total_profit >= 0 ? '+' : ''}$${data.summary.total_profit}`;
+    document.getElementById("bt-profit").className = `text-xl font-bold ${data.summary.total_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    document.getElementById("bt-dd").innerText = `${data.summary.max_drawdown}%`;
+    document.getElementById("bt-trades").innerText = data.summary.total_trades;
+    
+    // Trade List
+    const list = document.getElementById("bt-trade-list");
+    if (data.trades.length === 0) {
+        list.innerHTML = `<div class="text-center text-gray-600 text-xs py-4 italic">No trades executed in this period.</div>`;
+    } else {
+        list.innerHTML = data.trades.map(t => {
+            const isWin = t.profit > 0;
+            return `
+                <div class="flex items-center justify-between py-2 border-b border-gray-800/30 text-[10px]">
+                    <div class="flex flex-col">
+                        <span class="text-gray-300 font-bold">${new Date(t.open_time).toLocaleDateString()} ${t.direction}</span>
+                        <span class="text-gray-500">${t.open_price.toFixed(5)} → ${t.close_price.toFixed(5)}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="font-bold ${isWin ? 'text-emerald-500' : 'text-rose-500'}">${isWin ? '+' : ''}$${t.profit.toFixed(2)}</span>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+    
+    // Equity Chart
+    initBacktestChart(data.equity_curve);
+}
+
+function initBacktestChart(curve) {
+    const container = document.getElementById("bt-equity-chart");
+    if (!container || typeof LightweightCharts === 'undefined') return;
+    
+    // Clear previous
+    container.innerHTML = "";
+    
+    btChart = LightweightCharts.createChart(container, {
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#9CA3AF' },
+        grid: { vertLines: { color: 'rgba(31, 41, 55, 0.1)' }, horzLines: { color: 'rgba(31, 41, 55, 0.1)' } },
+        timeScale: { borderColor: 'rgba(31, 41, 55, 0.3)', timeVisible: true },
+        rightPriceScale: { borderVisible: false, autoScale: true },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+    });
+    
+    btSeries = btChart.addLineSeries({
+        color: '#A855F7', // Purple
+        lineWidth: 2,
+        priceLineVisible: false,
+    });
+    
+    if (curve && curve.length > 0) {
+        const mapped = curve.map(p => ({
+            time: new Date(p.time).getTime() / 1000,
+            value: p.equity
+        })).sort((a,b) => a.time - b.time);
+        
+        // Dedupe
+        const deduped = [];
+        for (let i = 0; i < mapped.length; i++) {
+            if (i === 0 || mapped[i].time !== mapped[i-1].time) {
+                deduped.push(mapped[i]);
+            }
+        }
+        
+        btSeries.setData(deduped);
+        btChart.timeScale().fitContent();
     }
 }
