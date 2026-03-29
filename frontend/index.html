@@ -322,18 +322,25 @@
                     <div class="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center border border-blue-500/30">
                         <i class="fa-solid fa-clock text-blue-400"></i>
                     </div>
-                    <h2 class="text-xl font-bold text-white tracking-tight">Working Hours</h2>
+                    <div class="flex flex-col">
+                        <h2 class="text-xl font-bold text-white tracking-tight">Working Hours</h2>
+                        <div id="modal-clock" class="flex items-center gap-2 mt-0.5">
+                            <span id="gmt-now" class="text-[9px] bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700 font-mono">GMT: --:--</span>
+                            <i class="fa-solid fa-arrow-right text-[8px] text-gray-700"></i>
+                            <span id="local-now" class="text-[9px] bg-blue-900/20 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800/20 font-mono">LOCAL: --:--</span>
+                        </div>
+                    </div>
                 </div>
                 <button onclick="toggleWorkingHoursModal()" class="text-gray-400 hover:text-white bg-gray-800/50 w-8 h-8 rounded-full flex items-center justify-center transition-colors">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
             
-            <p class="text-xs text-gray-500 mb-6 bg-blue-900/10 border border-blue-900/30 p-3 rounded-xl italic">
-                <i class="fa-solid fa-info-circle mr-1"></i> The bot will pause analysis and skip trades outside of these active windows (UTC Time).
+            <p class="text-[10px] text-gray-500 mb-6 bg-blue-900/10 border border-blue-900/30 p-2.5 rounded-xl italic leading-relaxed shrink-0">
+                <i class="fa-solid fa-info-circle mr-1 text-blue-400"></i> Set your trading windows in <strong>GMT Time</strong>. The app will automatically calculate your local translation (GMT+4).
             </p>
 
-            <div id="hours-list" class="space-y-3 mb-8">
+            <div id="hours-list" class="space-y-2 mb-6 overflow-y-auto pr-2 max-h-[400px] hidden-scrollbar">
                 <!-- Day rows injected here -->
             </div>
 

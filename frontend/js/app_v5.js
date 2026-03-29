@@ -984,16 +984,37 @@ function toggleWorkingHoursModal() {
         modal.offsetWidth;
         modal.classList.remove("opacity-0");
         modal.querySelector('.bg-panelbg').classList.remove("scale-95");
+        
+        // Start Live Clock
+        window.modalClockInterval = setInterval(updateModalHeaderClock, 1000);
+        updateModalHeaderClock();
     } else {
         modal.classList.add("opacity-0");
         modal.querySelector('.bg-panelbg').classList.add("scale-95");
         setTimeout(() => modal.classList.add("hidden"), 300);
+        
+        // Stop Live Clock
+        clearInterval(window.modalClockInterval);
     }
+}
+
+function updateModalHeaderClock() {
+    const gmtEl = document.getElementById("gmt-now");
+    const localEl = document.getElementById("local-now");
+    if (!gmtEl || !localEl) return;
+    
+    const now = new Date();
+    // Use Intl for precise formatting to avoid timezone offset math issues
+    const gmtStr = now.toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
+    const localStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    gmtEl.innerText = `GMT: ${gmtStr}`;
+    localEl.innerText = `LOCAL: ${localStr}`;
 }
 
 async function loadWorkingHours() {
     const list = document.getElementById("hours-list");
-    list.innerHTML = `<div class="text-center py-8"><i class="fa-solid fa-circle-notch fa-spin text-accent text-xl"></i></div>`;
+    list.innerHTML = `<div class="text-center py-12"><i class="fa-solid fa-circle-notch fa-spin text-accent text-2xl"></i></div>`;
     
     try {
         const res = await fetch("/api/settings/hours");
@@ -1001,7 +1022,7 @@ async function loadWorkingHours() {
         renderHoursList(data);
     } catch (e) {
         console.error("Failed to load hours:", e);
-        list.innerHTML = `<div class="text-center text-red-400 py-4 text-xs">Failed to load schedule.</div>`;
+        list.innerHTML = `<div class="text-center text-red-500 py-10 text-xs">Failed to load schedule. Check console.</div>`;
     }
 }
 
@@ -1009,8 +1030,8 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 
 function renderHoursList(data) {
     const list = document.getElementById("hours-list");
-    
-    // Create a map for existing data
+    const offset = -new Date().getTimezoneOffset() / 60;
+
     const hourMap = {};
     if (data && Array.isArray(data)) {
         data.forEach(h => hourMap[h.day_of_week] = h);
@@ -1020,42 +1041,85 @@ function renderHoursList(data) {
     for (let i = 0; i < 7; i++) {
         const h = hourMap[i] || { day_of_week: i, open_time: "00:00", close_time: "23:59", is_active: i < 5 };
         const isActive = h.is_active;
+
+        const getLocalPreview = (gmtTime) => {
+            if (!gmtTime) return "--:--";
+            const [hrs, mins] = gmtTime.split(':').map(Number);
+            let localHrs = (hrs + offset + 24) % 24;
+            return `${String(Math.floor(localHrs)).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+        };
+
+        const localOpen = getLocalPreview(h.open_time);
+        const localClose = getLocalPreview(h.close_time);
         
         html += `
-            <div class="day-row flex items-center justify-between bg-panelbg2/50 p-3 rounded-xl border border-gray-800/40 hover:border-gray-700/60 transition-all" data-day="${i}">
-                <div class="flex items-center gap-3 w-32">
+            <div class="day-row bg-panelbg2/40 rounded-xl p-3 border border-gray-800/40 hover:border-gray-700/50 transition-all flex items-center gap-4" data-day="${i}">
+                <div class="flex items-center gap-3 w-32 shrink-0">
                     <label class="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" class="sr-only peer day-active" ${isActive ? 'checked' : ''}>
-                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                        <div class="w-8 h-4.5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-blue-500"></div>
                     </label>
-                    <span class="text-sm font-bold ${isActive ? 'text-gray-200' : 'text-gray-600'}">${DAYS[i]}</span>
+                    <span class="text-xs font-bold uppercase ${isActive ? 'text-gray-200' : 'text-gray-700'}">${DAYS[i].substring(0,3)}</span>
                 </div>
                 
-                <div class="flex items-center gap-2 ${isActive ? '' : 'opacity-30 pointer-events-none'}">
-                    <input type="time" class="day-open bg-panelbg border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-blue-500 outline-none" value="${h.open_time}">
-                    <span class="text-gray-600 text-[10px] lowercase">to</span>
-                    <input type="time" class="day-close bg-panelbg border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-blue-500 outline-none" value="${h.close_time}">
+                <div class="flex-1 flex items-center justify-between ${isActive ? '' : 'opacity-20 pointer-events-none'}">
+                    <!-- Open Side -->
+                    <div class="flex flex-col items-center">
+                        <span class="text-[8px] text-gray-500 font-bold mb-1 uppercase tracking-tighter">GMT OPEN <span class="gmt-o-24 text-blue-400/60 ml-1">(${h.open_time})</span></span>
+                        <input type="time" class="day-open bg-panelbg border border-gray-700/50 rounded-lg px-1.5 py-1 text-[11px] font-mono text-gray-300 outline-none w-20 text-center" value="${h.open_time}" oninput="updateLocalPreview(this)">
+                        <span class="local-o-prev text-[9px] text-blue-500/60 font-mono mt-1">${localOpen} Local</span>
+                    </div>
+
+                    <i class="fa-solid fa-arrow-right text-gray-800 text-[10px] mt-2"></i>
+
+                    <!-- Close Side -->
+                    <div class="flex flex-col items-center">
+                        <span class="text-[8px] text-gray-500 font-bold mb-1 uppercase tracking-tighter">GMT CLOSE <span class="gmt-c-24 text-blue-400/60 ml-1">(${h.close_time})</span></span>
+                        <input type="time" class="day-close bg-panelbg border border-gray-700/50 rounded-lg px-1.5 py-1 text-[11px] font-mono text-gray-300 outline-none w-20 text-center" value="${h.close_time}" oninput="updateLocalPreview(this)">
+                        <span class="local-c-prev text-[9px] text-blue-500/60 font-mono mt-1">${localClose} Local</span>
+                    </div>
                 </div>
             </div>
         `;
     }
     list.innerHTML = html;
     
-    // Add event listeners to toggles to dim/brighten rows
+    // Auto-update visibility for existing rows
     list.querySelectorAll('.day-active').forEach(chk => {
         chk.addEventListener('change', (e) => {
             const row = e.target.closest('.day-row');
-            const inputs = row.querySelector('div:last-child');
-            const label = row.querySelector('span');
+            const editor = row.querySelector('.flex-1');
+            const label = row.querySelector('span:last-child');
             if (e.target.checked) {
-                inputs.classList.remove('opacity-30', 'pointer-events-none');
-                label.classList.replace('text-gray-600', 'text-gray-200');
+                editor.classList.remove('opacity-20', 'pointer-events-none');
+                label.classList.replace('text-gray-700', 'text-gray-200');
             } else {
-                inputs.classList.add('opacity-30', 'pointer-events-none');
-                label.classList.replace('text-gray-200', 'text-gray-600');
+                editor.classList.add('opacity-20', 'pointer-events-none');
+                label.classList.replace('text-gray-200', 'text-gray-700');
             }
         });
     });
+}
+
+function updateLocalPreview(input) {
+    const row = input.closest('.day-row');
+    const openVal = row.querySelector('.day-open').value;
+    const closeVal = row.querySelector('.day-close').value;
+    const offset = -new Date().getTimezoneOffset() / 60;
+    
+    const calc = (val) => {
+        if (!val) return "--:--";
+        const [h, m] = val.split(':').map(Number);
+        const lH = (h + offset + 24) % 24;
+        return `${String(Math.floor(lH)).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+    
+    row.querySelector('.local-o-prev').innerText = `${calc(openVal)} Local`;
+    row.querySelector('.local-c-prev').innerText = `${calc(closeVal)} Local`;
+    
+    // Update the GMT 24h labels too
+    row.querySelector('.gmt-o-24').innerText = `(${openVal})`;
+    row.querySelector('.gmt-c-24').innerText = `(${closeVal})`;
 }
 
 async function saveWorkingHours() {
@@ -1079,14 +1143,13 @@ async function saveWorkingHours() {
         });
         
         if (res.ok) {
-            console.log("Trading hours saved successfully");
             toggleWorkingHoursModal();
-            // Optional: Show a toast or feedback
+            // Optional: Notification toast
         } else {
-            alert("Failed to save trading hours");
+            alert("Failed to save schedule.");
         }
     } catch (e) {
         console.error("Save error:", e);
-        alert("Network error while saving hours.");
+        alert("Network error while saving.");
     }
 }
