@@ -45,8 +45,8 @@ class PositionSizer:
         risk_amount = min(risk_amount, settings.max_risk_amount_usd)
         
         # 1. Calculate Stop Loss distance using ATR (Average True Range)
-        # Using 1.5x ATR for Stop Loss to avoid noise triggering
-        sl_distance = atr_value * 1.5
+        # Using 2.0x ATR for Stop Loss to avoid noise triggering
+        sl_distance = atr_value * 2.0
         
         # Take Profit is typically 2x the risk distance (1:2 R:R ratio)
         tp_distance = sl_distance * 2.0

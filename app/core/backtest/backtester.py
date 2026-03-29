@@ -110,7 +110,7 @@ class Backtester:
                 risk_amount = min(balance * risk_pct, settings.max_risk_amount_usd)
                 
                 atr_val = ta_results["ATR"][-1].value if "ATR" in ta_results else (point * 15)
-                dist_sl = atr_val * 1.5
+                dist_sl = atr_val * 2.0
                 sl_points = dist_sl / point
                 
                 # Sizing logic (simplified tick value calculation)
