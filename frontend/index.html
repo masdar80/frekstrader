@@ -73,6 +73,11 @@
                 <i class="fa-solid fa-play"></i> RESUME TRADING
             </button>
             
+            <!-- Working Hours -->
+            <button class="w-10 h-10 rounded-xl bg-panelbg2 border border-blue-800/60 hover:bg-blue-800/30 text-blue-400 hover:text-white transition-all flex items-center justify-center shadow-lg shadow-blue-900/10" onclick="toggleWorkingHoursModal()" title="Working Hours">
+                <i class="fa-solid fa-clock"></i>
+            </button>
+            
             <!-- Quick Settings -->
             <button class="w-10 h-10 rounded-xl bg-panelbg2 border border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white transition-all flex items-center justify-center" onclick="toggleSettingsModal()">
                 <i class="fa-solid fa-sliders"></i>
@@ -306,6 +311,40 @@
             <button onclick="saveSettings()" class="w-full bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors shadow-lg shadow-accent/20">
                 Apply Trading Mode
             </button>
+        </div>
+    </div>
+
+    <!-- Working Hours Modal -->
+    <div id="hours-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-panelbg border border-gray-700/60 rounded-2xl w-full max-w-lg shadow-2xl transform scale-95 transition-transform duration-300 p-6">
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center border border-blue-500/30">
+                        <i class="fa-solid fa-clock text-blue-400"></i>
+                    </div>
+                    <h2 class="text-xl font-bold text-white tracking-tight">Working Hours</h2>
+                </div>
+                <button onclick="toggleWorkingHoursModal()" class="text-gray-400 hover:text-white bg-gray-800/50 w-8 h-8 rounded-full flex items-center justify-center transition-colors">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <p class="text-xs text-gray-500 mb-6 bg-blue-900/10 border border-blue-900/30 p-3 rounded-xl italic">
+                <i class="fa-solid fa-info-circle mr-1"></i> The bot will pause analysis and skip trades outside of these active windows (UTC Time).
+            </p>
+
+            <div id="hours-list" class="space-y-3 mb-8">
+                <!-- Day rows injected here -->
+            </div>
+
+            <div class="flex gap-4">
+                <button onclick="toggleWorkingHoursModal()" class="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-medium py-2.5 rounded-xl transition-colors">
+                    Cancel
+                </button>
+                <button onclick="saveWorkingHours()" class="flex-1 bg-accent hover:bg-accenthover text-white font-medium py-2.5 rounded-xl transition-colors shadow-lg shadow-accent/20">
+                    Save Schedule
+                </button>
+            </div>
         </div>
     </div>
 

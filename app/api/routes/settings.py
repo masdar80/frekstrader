@@ -1,18 +1,31 @@
 """
 Settings Routes — Configure Trading Mode dynamically.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List, Dict, Any
 import os
 import dotenv
 
 from app.config import settings, TradingMode
+from app.db.database import get_db
+from app.db import crud
 
 router = APIRouter()
 
 class ModeUpdate(BaseModel):
     mode: str
     use_ai_sentiment: bool = True
+
+class HourConfig(BaseModel):
+    day_of_week: int
+    open_time: str
+    close_time: str
+    is_active: bool
+
+class HoursUpdate(BaseModel):
+    hours: List[HourConfig]
 
 @router.put("/mode")
 async def update_trading_mode(req: ModeUpdate):
@@ -50,3 +63,18 @@ async def get_settings():
         "effective_risk": settings.effective_max_risk_pct,
         "threshold": settings.confidence_threshold
     }
+
+
+@router.get("/hours")
+async def get_trading_hours(db: AsyncSession = Depends(get_db)):
+    """Fetch all trading hour configurations."""
+    return await crud.get_trading_hours(db)
+
+
+@router.put("/hours")
+async def update_trading_hours(req: HoursUpdate, db: AsyncSession = Depends(get_db)):
+    """Update trading hour configurations."""
+    hours_data = [h.model_dump() for h in req.hours]
+    await crud.update_trading_hours(db, hours_data)
+    await db.commit()
+    return {"success": True}

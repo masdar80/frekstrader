@@ -85,6 +85,12 @@ class MarketWatcher:
             logger.info("⏸️ Market Watcher PAUSED. Skipping analysis cycle...")
             return
 
+        # 0. Check Working Hours (respect weekend/custom hours)
+        async with async_session() as db:
+            if not await crud.is_market_open(db):
+                logger.info("🕙 Outside of Trading Hours. Resting...")
+                return
+
         logger.info(f"--- 🔄 Starting analysis cycle for {len(settings.pairs_list)} pairs ---")
 
         # 1. Fetch current account state

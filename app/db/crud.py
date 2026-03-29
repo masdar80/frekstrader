@@ -2,11 +2,11 @@
 CRUD operations for database models.
 """
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Trade, Decision, Signal, AccountSnapshot, NewsEvent
+from app.db.models import Trade, Decision, Signal, AccountSnapshot, NewsEvent, TradingHours
 from app.utils.helpers import utcnow
 
 
@@ -160,3 +160,54 @@ async def get_recent_news(db: AsyncSession, hours: int = 24, limit: int = 20) ->
         select(NewsEvent).where(NewsEvent.timestamp >= cutoff).order_by(desc(NewsEvent.timestamp)).limit(limit)
     )
     return result.scalars().all()
+
+
+# === Trading Hours ===
+
+async def get_trading_hours(db: AsyncSession) -> List[TradingHours]:
+    """Get all trading hours config (sorted by day)."""
+    result = await db.execute(select(TradingHours).order_by(TradingHours.day_of_week.asc()))
+    return result.scalars().all()
+
+
+async def update_trading_hours(db: AsyncSession, hours_list: List[Dict[str, Any]]):
+    """Bulk update or create trading hours."""
+    for h in hours_list:
+        day = h.get("day_of_week")
+        result = await db.execute(select(TradingHours).where(TradingHours.day_of_week == day))
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            existing.open_time = h.get("open_time", "00:00")
+            existing.close_time = h.get("close_time", "23:59")
+            existing.is_active = h.get("is_active", True)
+        else:
+            new_h = TradingHours(
+                day_of_week=day,
+                open_time=h.get("open_time", "00:00"),
+                close_time=h.get("close_time", "23:59"),
+                is_active=h.get("is_active", True)
+            )
+            db.add(new_h)
+    await db.flush()
+
+
+async def is_market_open(db: AsyncSession) -> bool:
+    """Check if current time is within active trading hours (using UTC)."""
+    now = utcnow()
+    day = now.weekday()  # 0=Monday
+    time_str = now.strftime("%H:%M")
+    
+    result = await db.execute(
+        select(TradingHours).where(TradingHours.day_of_week == day)
+    )
+    hour_conf = result.scalar_one_or_none()
+    
+    if not hour_conf:
+        # Default to open if no configuration exists for this day yet
+        return True
+        
+    if not hour_conf.is_active:
+        return False
+        
+    return hour_conf.open_time <= time_str <= hour_conf.close_time

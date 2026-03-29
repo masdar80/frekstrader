@@ -970,4 +970,123 @@ function updateRiskMeters(metrics) {
     }
 }
 
+// --- Working Hours Logic ---
 
+// --- Working Hours Logic ---
+
+function toggleWorkingHoursModal() {
+    const modal = document.getElementById("hours-modal");
+    if (!modal) return;
+    
+    if (modal.classList.contains("hidden")) {
+        loadWorkingHours();
+        modal.classList.remove("hidden");
+        modal.offsetWidth;
+        modal.classList.remove("opacity-0");
+        modal.querySelector('.bg-panelbg').classList.remove("scale-95");
+    } else {
+        modal.classList.add("opacity-0");
+        modal.querySelector('.bg-panelbg').classList.add("scale-95");
+        setTimeout(() => modal.classList.add("hidden"), 300);
+    }
+}
+
+async function loadWorkingHours() {
+    const list = document.getElementById("hours-list");
+    list.innerHTML = `<div class="text-center py-8"><i class="fa-solid fa-circle-notch fa-spin text-accent text-xl"></i></div>`;
+    
+    try {
+        const res = await fetch("/api/settings/hours");
+        const data = await res.json();
+        renderHoursList(data);
+    } catch (e) {
+        console.error("Failed to load hours:", e);
+        list.innerHTML = `<div class="text-center text-red-400 py-4 text-xs">Failed to load schedule.</div>`;
+    }
+}
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function renderHoursList(data) {
+    const list = document.getElementById("hours-list");
+    
+    // Create a map for existing data
+    const hourMap = {};
+    if (data && Array.isArray(data)) {
+        data.forEach(h => hourMap[h.day_of_week] = h);
+    }
+    
+    let html = "";
+    for (let i = 0; i < 7; i++) {
+        const h = hourMap[i] || { day_of_week: i, open_time: "00:00", close_time: "23:59", is_active: i < 5 };
+        const isActive = h.is_active;
+        
+        html += `
+            <div class="day-row flex items-center justify-between bg-panelbg2/50 p-3 rounded-xl border border-gray-800/40 hover:border-gray-700/60 transition-all" data-day="${i}">
+                <div class="flex items-center gap-3 w-32">
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer day-active" ${isActive ? 'checked' : ''}>
+                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+                    </label>
+                    <span class="text-sm font-bold ${isActive ? 'text-gray-200' : 'text-gray-600'}">${DAYS[i]}</span>
+                </div>
+                
+                <div class="flex items-center gap-2 ${isActive ? '' : 'opacity-30 pointer-events-none'}">
+                    <input type="time" class="day-open bg-panelbg border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-blue-500 outline-none" value="${h.open_time}">
+                    <span class="text-gray-600 text-[10px] lowercase">to</span>
+                    <input type="time" class="day-close bg-panelbg border border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-300 focus:border-blue-500 outline-none" value="${h.close_time}">
+                </div>
+            </div>
+        `;
+    }
+    list.innerHTML = html;
+    
+    // Add event listeners to toggles to dim/brighten rows
+    list.querySelectorAll('.day-active').forEach(chk => {
+        chk.addEventListener('change', (e) => {
+            const row = e.target.closest('.day-row');
+            const inputs = row.querySelector('div:last-child');
+            const label = row.querySelector('span');
+            if (e.target.checked) {
+                inputs.classList.remove('opacity-30', 'pointer-events-none');
+                label.classList.replace('text-gray-600', 'text-gray-200');
+            } else {
+                inputs.classList.add('opacity-30', 'pointer-events-none');
+                label.classList.replace('text-gray-200', 'text-gray-600');
+            }
+        });
+    });
+}
+
+async function saveWorkingHours() {
+    const rows = document.querySelectorAll(".day-row");
+    const hours = [];
+    
+    rows.forEach(row => {
+        hours.push({
+            day_of_week: parseInt(row.getAttribute("data-day")),
+            open_time: row.querySelector(".day-open").value,
+            close_time: row.querySelector(".day-close").value,
+            is_active: row.querySelector(".day-active").checked
+        });
+    });
+    
+    try {
+        const res = await fetch("/api/settings/hours", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hours: hours })
+        });
+        
+        if (res.ok) {
+            console.log("Trading hours saved successfully");
+            toggleWorkingHoursModal();
+            // Optional: Show a toast or feedback
+        } else {
+            alert("Failed to save trading hours");
+        }
+    } catch (e) {
+        console.error("Save error:", e);
+        alert("Network error while saving hours.");
+    }
+}

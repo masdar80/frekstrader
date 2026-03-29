@@ -104,3 +104,15 @@ class NewsEvent(Base):
     sentiment_score = Column(Float, nullable=True)  # -1.0 to +1.0
     impact = Column(String(20), nullable=True)  # high, medium, low
     analysis = Column(Text, nullable=True)
+
+
+class TradingHours(Base):
+    """Trading hours configuration for the bot."""
+    __tablename__ = "trading_hours"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=Monday, 6=Sunday
+    open_time = Column(String(5), nullable=False, default="00:00")  # HH:MM
+    close_time = Column(String(5), nullable=False, default="23:59")  # HH:MM
+    is_active = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
