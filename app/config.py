@@ -19,11 +19,11 @@ class TradingMode(str, Enum):
 
 # Trading mode presets: (confidence_threshold, max_risk_pct, min_indicators_agree)
 TRADING_MODE_PRESETS = {
-    TradingMode.ULTRA_CONSERVATIVE: {"confidence_threshold": 0.85, "max_risk_pct": 0.5, "min_indicators": 5},
-    TradingMode.CONSERVATIVE:       {"confidence_threshold": 0.75, "max_risk_pct": 1.0, "min_indicators": 4},
-    TradingMode.BALANCED:           {"confidence_threshold": 0.65, "max_risk_pct": 1.5, "min_indicators": 3},
-    TradingMode.AGGRESSIVE:         {"confidence_threshold": 0.55, "max_risk_pct": 2.5, "min_indicators": 2},
-    TradingMode.ULTRA_AGGRESSIVE:   {"confidence_threshold": 0.45, "max_risk_pct": 4.0, "min_indicators": 1},
+    TradingMode.ULTRA_CONSERVATIVE: {"confidence_threshold": 0.75, "max_risk_pct": 0.5, "min_indicators": 5},
+    TradingMode.CONSERVATIVE:       {"confidence_threshold": 0.60, "max_risk_pct": 1.0, "min_indicators": 4},
+    TradingMode.BALANCED:           {"confidence_threshold": 0.45, "max_risk_pct": 1.5, "min_indicators": 3},
+    TradingMode.AGGRESSIVE:         {"confidence_threshold": 0.35, "max_risk_pct": 2.5, "min_indicators": 2},
+    TradingMode.ULTRA_AGGRESSIVE:   {"confidence_threshold": 0.25, "max_risk_pct": 4.0, "min_indicators": 1},
 }
 
 
