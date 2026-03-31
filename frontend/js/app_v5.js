@@ -560,6 +560,7 @@ async function saveSettings() {
     const mode = modeMetadata[index].value;
     const useAI = document.getElementById("ai-toggle").checked;
     const trailingEnabled = document.getElementById("trailing-toggle").checked;
+    const multiPosEnabled = document.getElementById("multi-pos-toggle").checked;
     const maxRiskAmount = parseFloat(document.getElementById("max-risk-amount").value) || 20.0;
     
     // Collect active live pairs
@@ -579,6 +580,7 @@ async function saveSettings() {
                 use_ai_sentiment: useAI,
                 max_risk_amount_usd: maxRiskAmount,
                 trailing_stop_enabled: trailingEnabled,
+                allow_multiple_per_pair: multiPosEnabled,
                 pairs: pairs
             })
         });
@@ -618,6 +620,12 @@ async function fetchSettings() {
             const trailingToggle = document.getElementById("trailing-toggle");
             if (trailingToggle) {
                 trailingToggle.checked = data.trailing_stop_enabled;
+            }
+
+            // Sync Multi-pos toggle
+            const multiPosToggle = document.getElementById("multi-pos-toggle");
+            if (multiPosToggle) {
+                multiPosToggle.checked = data.allow_multiple_per_pair;
             }
 
             // Sync Max Risk Amount

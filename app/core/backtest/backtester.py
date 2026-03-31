@@ -110,8 +110,8 @@ class Backtester:
                     if symbol not in candle_data or current_time not in candle_data[symbol]["1h"].index: 
                         continue
                     
-                    # Ensure we don't double-dip on the same symbol
-                    if any(t["symbol"] == symbol for t in self.open_trades):
+                    # Ensure we don't double-dip on the same symbol unless allowed
+                    if not settings.allow_multiple_per_pair and any(t["symbol"] == symbol for t in self.open_trades):
                         continue
 
                     # Slice data for analysis

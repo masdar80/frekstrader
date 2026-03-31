@@ -19,6 +19,7 @@ class ModeUpdate(BaseModel):
     use_ai_sentiment: bool = True
     max_risk_amount_usd: float = 20.0
     trailing_stop_enabled: bool = True
+    allow_multiple_per_pair: bool = False
     pairs: List[str] = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF"]
 
 class HourConfig(BaseModel):
@@ -43,6 +44,7 @@ async def update_trading_mode(req: ModeUpdate):
     settings.use_ai_sentiment = req.use_ai_sentiment
     settings.max_risk_amount_usd = req.max_risk_amount_usd
     settings.trailing_stop_enabled = req.trailing_stop_enabled
+    settings.allow_multiple_per_pair = req.allow_multiple_per_pair
     settings.trading_pairs = ",".join([p.upper() for p in req.pairs])
     
     # Ideally save to .env to persist across restarts
@@ -52,6 +54,7 @@ async def update_trading_mode(req: ModeUpdate):
         dotenv.set_key(dotenv_file, "USE_AI_SENTIMENT", "true" if req.use_ai_sentiment else "false")
         dotenv.set_key(dotenv_file, "MAX_RISK_AMOUNT_USD", str(req.max_risk_amount_usd))
         dotenv.set_key(dotenv_file, "TRAILING_STOP_ENABLED", "true" if req.trailing_stop_enabled else "false")
+        dotenv.set_key(dotenv_file, "ALLOW_MULTIPLE_PER_PAIR", "true" if req.allow_multiple_per_pair else "false")
         dotenv.set_key(dotenv_file, "TRADING_PAIRS", settings.trading_pairs)
         
     return {
@@ -75,7 +78,8 @@ async def get_settings():
         "effective_risk": settings.effective_max_risk_pct,
         "threshold": settings.confidence_threshold,
         "max_risk_amount_usd": settings.max_risk_amount_usd,
-        "trailing_stop_enabled": settings.trailing_stop_enabled
+        "trailing_stop_enabled": settings.trailing_stop_enabled,
+        "allow_multiple_per_pair": settings.allow_multiple_per_pair
     }
 
 
