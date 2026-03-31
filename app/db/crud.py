@@ -31,8 +31,13 @@ async def get_open_trades_by_external_id(db: AsyncSession) -> Dict[str, Trade]:
     return {t.external_id: t for t in trades}
 
 
-async def get_trade_history(db: AsyncSession, limit: int = 50) -> List[Trade]:
-    result = await db.execute(select(Trade).order_by(desc(Trade.opened_at)).limit(limit))
+async def get_trade_history(db: AsyncSession, limit: int = 50, offset: int = 0) -> List[Trade]:
+    result = await db.execute(
+        select(Trade)
+        .order_by(desc(Trade.opened_at))
+        .limit(limit)
+        .offset(offset)
+    )
     return result.scalars().all()
 
 

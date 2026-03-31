@@ -38,10 +38,11 @@ class RiskManager:
             return {"allowed": False, "reason": f"Max open positions reached ({self.max_exposure})"}
 
         # Check 2: Already holding this currency pair?
-        symbols_held = [p.get("symbol", "") for p in open_positions]
-        if symbol in symbols_held:
-            # Simple rule: 1 position per pair at a time max
-            return {"allowed": False, "reason": f"Already holding {symbol}"}
+        if not settings.allow_multiple_per_pair:
+            symbols_held = [p.get("symbol", "") for p in open_positions]
+            if symbol in symbols_held:
+                # Simple rule: 1 position per pair at a time max
+                return {"allowed": False, "reason": f"Already holding {symbol}"}
 
         # Check 2.5: Correlation exposure
         base_ccy = symbol[:3]

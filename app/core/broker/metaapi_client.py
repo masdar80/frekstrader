@@ -53,10 +53,15 @@ class MetaAPIClient:
             self._client = httpx.AsyncClient(timeout=30, headers=self._headers)
 
             # Step 1: Get account details from provisioning API to find the region
-            logger.info("Fetching account details from MetaAPI...")
-            resp = await self._client.get(
-                f"{PROVISIONING_URL}/users/current/accounts/{account_id}"
-            )
+            logger.info(f"Fetching account details from {PROVISIONING_URL}...")
+            try:
+                resp = await self._client.get(
+                    f"{PROVISIONING_URL}/users/current/accounts/{account_id}",
+                    timeout=10.0
+                )
+            except Exception as e:
+                logger.error(f"❌ Provisioning API error: {e}")
+                return False
 
             if resp.status_code != 200:
                 logger.error(f"❌ Failed to fetch account: {resp.status_code} {resp.text[:200]}")

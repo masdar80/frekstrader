@@ -464,6 +464,8 @@ class MarketWatcher:
                     
             await db.commit()
 
+            await db.commit()
+
     def pause(self):
         """Pauses the market watcher analysis loop."""
         self.is_paused = True

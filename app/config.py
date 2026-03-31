@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     drawdown_circuit_breaker_pct: float = 10.0
     max_slippage_pips: float = 3.0
     max_risk_amount_usd: float = 20.0  # Phase 1.3: Hard cap on trade loss
+    allow_multiple_per_pair: bool = False  # If True, can open 2+ positions on same pair
 
     # === Trailing Stop Loss (Phase 2) ===
     trailing_stop_enabled: bool = True

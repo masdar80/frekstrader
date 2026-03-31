@@ -8,6 +8,7 @@ let ws;
 let isConnected = false;
 let currentAuditFilter = 'all';
 let cachedDecisions = [];
+let currentHistoryOffset = 0;
 
 // DOM Elements
 const statusBadge = document.getElementById("status-badge");
@@ -925,34 +926,61 @@ async function fetchEquityHistory(hours) {
     } catch (e) { console.error("Equity History fetch error:", e); }
 }
 
-async function fetchTradeHistory() {
+async function fetchTradeHistory(append = false) {
+    if (!append) currentHistoryOffset = 0;
+    
     try {
-        const res = await fetch(`/api/dashboard/trade-history?limit=50`);
+        const res = await fetch(`/api/dashboard/trade-history?limit=50&offset=${currentHistoryOffset}`);
         if (res.ok) {
             const data = await res.json();
-            renderTradeHistory(data);
+            renderTradeHistory(data, append);
+            
+            // Increment offset for next load
+            if (data.length > 0) {
+                currentHistoryOffset += data.length;
+            }
+            
+            // Handle load more button visibility
+            updateLoadMoreBtn(data.length === 50);
         }
     } catch (e) { console.error("Trade History fetch error:", e); }
 }
 
-function renderTradeHistory(trades) {
-    const list = document.getElementById("trade-history-list");
+function renderTradeHistory(trades, append = false) {
+    const container = document.getElementById("trade-history-list");
+    
     if (!trades || trades.length === 0) {
-        list.innerHTML = `<div class="flex h-full items-center justify-center text-gray-500 text-sm italic py-8">No closed trades yet.</div>`;
+        if (!append) {
+            container.innerHTML = `<div class="flex h-full items-center justify-center text-gray-500 text-sm italic py-8">No closed trades yet.</div>`;
+        }
         return;
     }
     
-    let html = `<table class="w-full text-left text-xs bg-transparent">
-        <thead class="text-gray-500 bg-black/20 sticky top-0 uppercase font-bold text-[9px] mb-2 tracking-widest">
-            <tr>
-                <th class="p-2">Time</th>
-                <th class="p-2">Pair</th>
-                <th class="p-2">Side</th>
-                <th class="p-2 text-right">P&L</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-800/50">`;
-        
+    let tableBody;
+    if (!append) {
+        // Initial load: create the table structure
+        container.innerHTML = `
+            <table class="w-full text-left text-xs bg-transparent">
+                <thead class="text-gray-500 bg-black/20 sticky top-0 uppercase font-bold text-[9px] mb-2 tracking-widest z-10 glass">
+                    <tr>
+                        <th class="p-2">Time</th>
+                        <th class="p-2">Pair</th>
+                        <th class="p-2">Side</th>
+                        <th class="p-2 text-right">P&L</th>
+                    </tr>
+                </thead>
+                <tbody id="trade-history-body" class="divide-y divide-gray-800/50"></tbody>
+            </table>
+            <div id="history-load-more-container" class="p-4 flex justify-center">
+                <button id="btn-load-more-trades" onclick="fetchTradeHistory(true)" class="hidden text-[10px] text-accent hover:text-accenthover font-bold uppercase tracking-widest border border-accent/30 px-4 py-2 rounded-lg hover:bg-accent/10 transition-all">
+                    Load More Transactions
+                </button>
+            </div>
+        `;
+    }
+    
+    tableBody = document.getElementById("trade-history-body");
+    
     trades.forEach(t => {
         const d = new Date(t.closed_at);
         const timeStr = d.toLocaleDateString([], { month: 'short', day: 'numeric'}) + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit'});
@@ -963,18 +991,27 @@ function renderTradeHistory(trades) {
         const pnlStr = (t.profit >= 0 ? "+" : "") + "$" + t.profit.toFixed(2);
         const pnlColor = t.profit >= 0 ? "text-emerald-400" : "text-red-400";
         
-        html += `
-            <tr class="hover:bg-gray-800/30 transition-colors group">
-                <td class="p-2 text-gray-500 text-[10px] whitespace-nowrap">${timeStr}</td>
-                <td class="p-2 font-bold text-gray-300">${t.symbol}</td>
-                <td class="p-2 font-bold ${dirColor}">${t.direction}</td>
-                <td class="p-2 font-mono font-bold text-right ${pnlColor}">${pnlStr}</td>
-            </tr>
+        const row = document.createElement("tr");
+        row.className = "hover:bg-gray-800/30 transition-colors group";
+        row.innerHTML = `
+            <td class="p-2 text-gray-500 text-[10px] whitespace-nowrap">${timeStr}</td>
+            <td class="p-2 font-bold text-gray-300">${t.symbol}</td>
+            <td class="p-2 font-bold ${dirColor}">${t.direction}</td>
+            <td class="p-2 font-mono font-bold text-right ${pnlColor}">${pnlStr}</td>
         `;
+        tableBody.appendChild(row);
     });
+}
+
+function updateLoadMoreBtn(hasMore) {
+    const btn = document.getElementById("btn-load-more-trades");
+    if (!btn) return;
     
-    html += `</tbody></table>`;
-    list.innerHTML = html;
+    if (hasMore) {
+        btn.classList.remove("hidden");
+    } else {
+        btn.classList.add("hidden");
+    }
 }
 
 function updateRiskMeters(metrics) {
