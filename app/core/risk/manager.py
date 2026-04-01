@@ -54,8 +54,8 @@ class RiskManager:
                 held_quote = s_held[3:]
                 held_dir = "BUY" if "BUY" in str(p.get("type", "")).upper() else "SELL"
                 
-                # Same-direction exposure on same currency
-                if (base_ccy == held_base or quote_ccy == held_quote) and held_dir == direction:
+                # Same-direction exposure on same currency (skip if it's the exact same pair, handled in Check 2)
+                if s_held != symbol and (base_ccy == held_base or quote_ccy == held_quote) and held_dir == direction:
                     return {"allowed": False, "reason": f"Correlated exposure: already {held_dir} {s_held}"}
 
         # Check 3: Daily PNL Limit
