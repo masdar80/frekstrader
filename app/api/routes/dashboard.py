@@ -75,11 +75,10 @@ async def get_equity_history_route(hours: int = 24, db: AsyncSession = Depends(g
     ]
 
 @router.get("/trade-history")
-async def get_trade_history_route(limit: int = 50, offset: int = 0, db: AsyncSession = Depends(get_db)):
+async def get_trade_history_route(limit: int = 10, offset: int = 0, db: AsyncSession = Depends(get_db)):
     """Return closed trades for history panel with pagination."""
-    # We fetch enough to cover the limit after filtering for 'closed' status
     trades = await crud.get_trade_history(db, limit=limit, offset=offset)
-    closed_trades = [
+    return [
         {
             "id": t.id,
             "symbol": t.symbol,
@@ -92,9 +91,8 @@ async def get_trade_history_route(limit: int = 50, offset: int = 0, db: AsyncSes
             "closed_at": t.closed_at,
             "trading_mode": t.trading_mode
         }
-        for t in trades if t.status == "closed"
+        for t in trades
     ]
-    return closed_trades[:limit]
 
 @router.get("/strategy-stats")
 async def get_strategy_stats(db: AsyncSession = Depends(get_db)):

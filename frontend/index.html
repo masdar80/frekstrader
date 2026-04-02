@@ -131,6 +131,9 @@
                         <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
                             <i class="fa-solid fa-brain text-accent"></i> Skeptical Brain Audit
                         </h3>
+                        <button onclick="expandWidget('audit')" class="text-gray-500 hover:text-accent transition-colors ml-2">
+                            <i class="fa-solid fa-expand text-xs"></i>
+                        </button>
                         <span id="audit-heartbeat" class="text-[9px] text-gray-600 font-mono mt-0.5 opacity-0 transition-opacity">
                             <i class="fa-solid fa-bolt text-yellow-500/50"></i> Pulse: --:--:--
                         </span>
@@ -223,6 +226,9 @@
                     <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
                         <i class="fa-solid fa-briefcase text-emerald-400"></i> Open Positions
                     </h3>
+                    <button onclick="expandWidget('positions')" class="text-gray-500 hover:text-emerald-400 transition-colors ml-2">
+                        <i class="fa-solid fa-expand text-xs"></i>
+                    </button>
                     <span id="pos-count" class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400">0</span>
                 </div>
                 <div class="flex-1 overflow-y-auto p-2" id="positions-list">
@@ -255,11 +261,19 @@
                     <h3 class="font-semibold text-sm text-gray-300 flex items-center gap-2">
                         <i class="fa-solid fa-clock-rotate-left text-gray-400"></i> Trade History
                     </h3>
+                    <button onclick="expandWidget('history')" class="text-gray-500 hover:text-white transition-colors ml-2">
+                        <i class="fa-solid fa-expand text-xs"></i>
+                    </button>
                 </div>
-                <div class="flex-1 overflow-y-auto p-0 hidden-scrollbar" id="trade-history-list">
+                <div class="overflow-y-auto p-0 hidden-scrollbar max-h-[400px]" id="trade-history-list">
                     <div class="flex h-full items-center justify-center text-gray-500 text-sm italic py-8">
                         No closed trades yet.
                     </div>
+                </div>
+                <div class="p-2 border-t border-gray-800/40 bg-panelbg2/20 shrink-0">
+                    <button id="load-more-btn" onclick="loadMoreHistory()" class="w-full py-1.5 text-[10px] text-gray-500 hover:text-white transition-colors uppercase tracking-widest font-bold">
+                        LOAD MORE <i class="fa-solid fa-chevron-down ml-1"></i>
+                    </button>
                 </div>
             </div>
 
@@ -377,6 +391,16 @@
                             <input type="checkbox" id="ai-toggle" class="sr-only peer" checked>
                             <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
                         </label>
+                    </div>
+
+                    <div class="flex items-center justify-between p-3 bg-panelbg2 rounded-xl border border-gray-800 border-dashed border-accent/30">
+                        <div>
+                            <span class="block text-sm font-bold text-accent">Max Open Positions</span>
+                            <span class="text-xs text-gray-500">Global trade limit</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="max-pos-input" min="1" max="50" value="15" class="w-16 bg-gray-800 border border-gray-700 text-white rounded px-2 py-1 text-sm text-center">
+                        </div>
                     </div>
 
                     <div class="flex items-center justify-between p-3 bg-panelbg2 rounded-xl border border-gray-800 border-dashed border-accent/30">
@@ -550,5 +574,35 @@
     </div>
 
     <script src="/static/js/app_v5.js"></script>
+    <!-- Fullscreen Modal Overlay -->
+    <div id="fullscreen-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="bg-panelbg border border-gray-700/60 rounded-3xl w-[95%] h-[90%] shadow-2xl flex flex-col overflow-hidden relative transform scale-95 transition-transform duration-300">
+            <!-- Modal Header -->
+            <div class="px-8 py-5 border-b border-gray-800/60 flex justify-between items-center shrink-0">
+                <div class="flex items-center gap-4">
+                    <div id="fs-icon-container" class="w-10 h-10 rounded-xl bg-accent/20 flex items-center justify-center border border-accent/30 text-accent text-xl">
+                        <i class="fa-solid fa-expand"></i>
+                    </div>
+                    <div>
+                        <h2 id="fs-title" class="text-2xl font-bold text-white tracking-tight uppercase">Expanded View</h2>
+                        <p id="fs-subtitle" class="text-xs text-gray-500 tracking-widest mt-0.5 uppercase">ForeksTrader Professional Terminal</p>
+                    </div>
+                </div>
+                <button onclick="closeFullscreen()" class="w-12 h-12 rounded-full bg-gray-800/50 hover:bg-red-500/20 text-gray-400 hover:text-red-400 flex items-center justify-center transition-all border border-transparent hover:border-red-500/30">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Modal Content -->
+            <div id="fs-content" class="flex-1 overflow-y-auto p-8 hidden-scrollbar">
+                <!-- Content injected here -->
+            </div>
+            
+            <!-- Modal Footer (for pagination) -->
+            <div id="fs-footer" class="px-8 py-4 bg-panelbg2/30 border-t border-gray-800/60 flex justify-center hidden">
+                <!-- Pagination injected here -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>

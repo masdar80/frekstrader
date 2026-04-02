@@ -582,7 +582,7 @@ async function saveSettings() {
                 max_risk_amount_usd: maxRiskAmount,
                 trailing_stop_enabled: trailingEnabled,
                 allow_multiple_per_pair: multiPosEnabled,
-                max_open_positions: maxOpenPositions,
+                max_open_positions: parseInt(document.getElementById("max-pos-input").value) || 15,
                 pairs: pairs
             })
         });
@@ -946,7 +946,7 @@ async function fetchTradeHistory(append = false) {
     if (!append) currentHistoryOffset = 0;
     
     try {
-        const res = await fetch(`/api/dashboard/trade-history?limit=50&offset=${currentHistoryOffset}`);
+        const res = await fetch(`/api/dashboard/trade-history?limit=10&offset=${currentHistoryOffset}`);
         if (res.ok) {
             const data = await res.json();
             renderTradeHistory(data, append);
@@ -957,9 +957,30 @@ async function fetchTradeHistory(append = false) {
             }
             
             // Handle load more button visibility
-            updateLoadMoreBtn(data.length === 50);
+            const loadMoreBtn = document.getElementById("load-more-btn");
+            if (loadMoreBtn) {
+                if (data.length === 10) {
+                    loadMoreBtn.classList.remove("hidden");
+                    loadMoreBtn.innerText = "LOAD MORE";
+                } else {
+                    loadMoreBtn.classList.add("hidden");
+                }
+            }
         }
-    } catch (e) { console.error("Trade History fetch error:", e); }
+    } catch (e) { 
+        console.error("Trade History fetch error:", e); 
+        const loadMoreBtn = document.getElementById("load-more-btn");
+        if (loadMoreBtn) loadMoreBtn.innerText = "LOAD MORE (ERROR)";
+    }
+}
+
+async function loadMoreHistory() {
+    const btn = document.getElementById("load-more-btn");
+    if (!btn) return;
+    
+    btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> LOADING...`;
+    // fetchTradeHistory already handles the offset increment inside it
+    await fetchTradeHistory(true);
 }
 
 function renderTradeHistory(trades, append = false) {
@@ -1388,4 +1409,105 @@ function initBacktestChart(curve) {
         btSeries.setData(deduped);
         btChart.timeScale().fitContent();
     }
+}
+
+// --- Fullscreen Widget Logic ---
+let activeFSWidget = null;
+
+function expandWidget(type) {
+    const modal = document.getElementById("fullscreen-modal");
+    if (!modal) return;
+    
+    activeFSWidget = type;
+    
+    // Update Header
+    const titleEl = document.getElementById("fs-title");
+    const iconContainer = document.getElementById("fs-icon-container");
+    const footer = document.getElementById("fs-footer");
+    
+    footer.classList.add("hidden");
+    
+    if (type === 'history') {
+        titleEl.innerText = "Trade History Log";
+        iconContainer.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i>`;
+        footer.classList.remove("hidden");
+        footer.innerHTML = `<button onclick="loadMoreHistory()" class="bg-accent hover:bg-accenthover text-white px-8 py-3 rounded-full font-bold transition-all shadow-lg shadow-accent/20 uppercase tracking-widest text-sm">Load More Transactions <i class="fa-solid fa-chevron-down ml-2"></i></button>`;
+    } else if (type === 'positions') {
+        titleEl.innerText = "Open Positions Terminal";
+        iconContainer.innerHTML = `<i class="fa-solid fa-briefcase"></i>`;
+    } else if (type === 'audit') {
+        titleEl.innerText = "Skeptical Brain Decision Audit";
+        iconContainer.innerHTML = `<i class="fa-solid fa-brain"></i>`;
+    }
+    
+    // Show Modal
+    modal.classList.remove("hidden");
+    modal.offsetWidth;
+    modal.classList.remove("opacity-0");
+    modal.querySelector('.bg-panelbg').classList.remove("scale-95");
+    
+    updateFullscreenContent();
+}
+
+function updateFullscreenContent() {
+    if (!activeFSWidget) return;
+    
+    const content = document.getElementById("fs-content");
+    const sourceId = {
+        'history': 'trade-history-list',
+        'positions': 'positions-list',
+        'audit': 'decision-log'
+    }[activeFSWidget];
+    
+    const source = document.getElementById(sourceId);
+    if (source && content) {
+        // Clone the content to the modal
+        const clone = source.cloneNode(true);
+        clone.id = "fs-cloned-content";
+        clone.classList.remove("max-h-[400px]", "h-80"); // Remove height limits in fullscreen
+        
+        // For history, remove the "Load More" button from the main list clone as it's in the footer
+        if (activeFSWidget === 'history') {
+             const btn = clone.querySelector("#load-more-btn");
+             if (btn) btn.remove();
+        }
+        
+        content.innerHTML = "";
+        content.appendChild(clone);
+    }
+}
+
+function closeFullscreen() {
+    const modal = document.getElementById("fullscreen-modal");
+    if (!modal) return;
+    
+    activeFSWidget = null;
+    modal.classList.add("opacity-0");
+    modal.querySelector('.bg-panelbg').classList.add("scale-95");
+    setTimeout(() => modal.classList.add("hidden"), 300);
+}
+
+// Update live content in fullscreen if open
+const originalRenderPositions = typeof renderPositions === 'function' ? renderPositions : null;
+if (originalRenderPositions) {
+    window.renderPositions = function(positions) {
+        originalRenderPositions(positions);
+        if (activeFSWidget === 'positions') updateFullscreenContent();
+    };
+}
+
+const originalRenderDecisions = typeof renderDecisions === 'function' ? renderDecisions : null;
+if (originalRenderDecisions) {
+    window.renderDecisions = function(decisions) {
+        originalRenderDecisions(decisions);
+        if (activeFSWidget === 'audit') updateFullscreenContent();
+    };
+}
+
+const originalRenderTradeHistory = typeof renderTradeHistory === 'function' ? renderTradeHistory : null;
+if (originalRenderTradeHistory) {
+    window.renderTradeHistory = function(trades, append) {
+        originalRenderTradeHistory(trades, append);
+        if (activeFSWidget === 'history') updateFullscreenContent();
+    };
 }
