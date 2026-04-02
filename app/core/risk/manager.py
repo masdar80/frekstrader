@@ -34,8 +34,8 @@ class RiskManager:
             return {"allowed": False, "reason": "Account equity zero or not loaded"}
 
         # Check 1: Max Open Positions
-        if len(open_positions) >= self.max_exposure:
-            return {"allowed": False, "reason": f"Max open positions reached ({self.max_exposure})"}
+        if len(open_positions) >= settings.max_open_positions:
+            return {"allowed": False, "reason": f"Max open positions reached ({settings.max_open_positions})"}
 
         # Check 2: Already holding this currency pair?
         if not settings.allow_multiple_per_pair:

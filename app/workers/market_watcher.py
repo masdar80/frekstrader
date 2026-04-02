@@ -10,6 +10,7 @@ v2 — Performance improvements:
 """
 import asyncio
 import time
+from datetime import timedelta
 from typing import List, Dict, Any, Optional
 
 from app.config import settings
@@ -26,7 +27,9 @@ from app.core.risk.trailing_manager import trailing_manager
 from app.api.websocket import manager as ws_manager
 from app.utils.helpers import utcnow
 
+from sqlalchemy import select
 from app.db.database import async_session
+from app.db.models import Trade
 from app.db import crud
 
 
@@ -81,18 +84,13 @@ class MarketWatcher:
         logger.info("🛑 Market Watcher stopped.")
 
     async def _run_cycle(self):
-        """One complete execution cycle for all pairs."""
-        if self.is_paused:
-            logger.info("⏸️ Market Watcher PAUSED. Skipping analysis cycle...")
-            return
-
         # 0. Check Working Hours (respect weekend/custom hours)
         async with async_session() as db:
             if not await crud.is_market_open(db):
                 logger.info("🕙 Outside of Trading Hours. Resting...")
                 return
 
-        logger.info(f"--- 🔄 Starting analysis cycle for {len(settings.pairs_list)} pairs ---")
+        logger.info(f"--- 🔄 Starting data cycle for {len(settings.pairs_list)} pairs ---")
 
         # 1. Fetch current account state
         account_info = await broker.get_account_info()
@@ -135,6 +133,12 @@ class MarketWatcher:
                 drawdown_pct=round(drawdown_pct, 2),
             )
             await db.commit()
+
+        if self.is_paused:
+            logger.info("⏸️ Market Watcher PAUSED. Skipping analysis and trading loop...")
+            return
+
+        logger.info(f"--- 🔎 Starting analysis cycle for {len(settings.pairs_list)} pairs ---")
 
         # 3. Check if sentiment needs refreshing (every 15 min)
         now = time.time()
@@ -410,39 +414,58 @@ class MarketWatcher:
         })
 
     async def _reconcile_positions(self, open_positions: List[Dict[str, Any]]):
-        """Reconcile broker positions with DB open trades to detect closures."""
+        """Reconcile broker positions with DB open trades to detect closures and fill missing P&L."""
         broker_position_ids = {p.get("id") for p in open_positions if p.get("id")}
         
         async with async_session() as db:
-            open_db_trades = await crud.get_open_trades_by_external_id(db)
+            # We fetch 'open' trades OR 'closed' trades that have 0.0 profit (from emergency/manual fixes)
+            res = await db.execute(
+                select(Trade).where(
+                    (Trade.status == "open") | 
+                    ((Trade.status == "closed") & (Trade.profit == 0.0) & (Trade.closed_at > utcnow() - timedelta(hours=48)))
+                )
+            )
+            process_trades = {t.external_id: t for t in res.scalars().all() if t.external_id}
+            open_db_ids = {t.external_id for t in process_trades.values() if t.status == "open"}
             
-            # Fetch history only if there's a discrepancy
+            # Fetch history once
             history = None
             
-            for ext_id, trade in open_db_trades.items():
+            for ext_id, trade in process_trades.items():
                 if ext_id not in broker_position_ids:
                     logger.info(f"🔄 Reconciling closed trade: {trade.symbol} (ID: {ext_id})")
                     
                     if history is None:
-                        history = await broker.get_history(days=3)
+                        history = await broker.get_history(days=7)
                         
-                    # MT5: A position can have multiple deals (Entry In, Entry Out).
-                    # We must sum them all to get the true P&L.
+                    # Find deals for this position
                     matching_deals = [d for d in history if d.get("position_id") == ext_id]
                     
-                    profit = 0.0
-                    close_price = 0.0
-                    
-                    if matching_deals:
-                        for deal in matching_deals:
-                            profit += deal.get("profit", 0.0) + deal.get("swap", 0.0) + deal.get("commission", 0.0)
-                            # The close price is from the DEAL_ENTRY_OUT or DEAL_ENTRY_INOUT
-                            if deal.get("entry_type") in ["DEAL_ENTRY_OUT", "DEAL_ENTRY_INOUT"]:
-                                close_price = deal.get("price", 0.0)
+                    # FALLBACK: If batch history is empty (common on MT5 REST), try position-specific lookup
+                    if not matching_deals:
+                        logger.debug(f"  🔍 Falling back to position-specific lookup for {ext_id}")
+                        matching_deals = await broker.get_deals_by_position(ext_id)
                         
-                        # Fallback for close price if deal entry type mapping is missing
-                        if close_price == 0.0:
-                            close_price = matching_deals[-1].get("price", 0.0)
+                    if matching_deals:
+                        # MT5: A position can have multiple deals (Entry In, Entry Out).
+                        # We must sum them all to get the true P&L.
+                        profit = sum(float(d.get("profit", 0) or 0) for d in matching_deals)
+                        commissions = sum(float(d.get("commission", 0) or 0) for d in matching_deals)
+                        swaps = sum(float(d.get("swap", 0) or 0) for d in matching_deals)
+                        
+                        # Add commissions and swaps to the final profit
+                        profit = profit + commissions + swaps
+                        
+                        # Find the closing price (it's the price of the DEAL_ENTRY_OUT)
+                        close_price = 0.0
+                        for d in matching_deals:
+                            if d.get("entry_type") == "DEAL_ENTRY_OUT" or d.get("type", "").endswith("SELL"):
+                                close_price = float(d.get("price", 0) or 0)
+                                if close_price > 0:
+                                    break
+                                    
+                        if close_price == 0:
+                            close_price = float(matching_deals[-1].get("price", 0) or 0)
                             
                         logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price}")
                         
@@ -461,9 +484,30 @@ class MarketWatcher:
                             logger.error(f"  ❌ Exhausted retries for {trade.symbol} (pos:{ext_id}). Marking as closed with 0 profit.")
                             await crud.close_trade(db, trade.id, 0.0, 0.0)
                             await crud.update_decision_outcome(db, trade.id, False)
-                    
-            await db.commit()
 
+            # --- Adoption Logic: Find broker positions NOT in DB ---
+            for pos in open_positions:
+                pos_id = str(pos.get("id"))
+                if pos_id and pos_id not in open_db_ids:
+                    symbol = pos.get("symbol")
+                    logger.info(f"➕ Adopting unknown position found at broker: {symbol} (ID: {pos_id})")
+                    
+                    p_type = pos.get("type", "")
+                    direction = "BUY" if "BUY" in p_type.upper() else "SELL"
+                    
+                    await crud.create_trade(
+                        db,
+                        external_id=pos_id,
+                        symbol=symbol,
+                        direction=direction,
+                        volume=pos.get("volume", 0.01),
+                        open_price=pos.get("openPrice", 0.0),
+                        stop_loss=pos.get("stopLoss"),
+                        take_profit=pos.get("takeProfit"),
+                        trading_mode="recovered",
+                        metadata_json={"recovered": True, "sync_at": utcnow().isoformat()}
+                    )
+                    
             await db.commit()
 
     def pause(self):
@@ -481,6 +525,11 @@ class MarketWatcher:
         self.pause()
         logger.critical("🚨 EMERGENCY CLOSE ALL TRIGGERED! Closing all open positions...")
         open_positions = await broker.get_positions()
+        
+        if not open_positions:
+            logger.info("No open positions to close.")
+            return
+
         for pos in open_positions:
             try:
                 pos_id = pos.get("id")
@@ -488,10 +537,24 @@ class MarketWatcher:
                 if pos_id:
                     logger.critical(f"Closing position {pos_id} for {symbol}...")
                     res = await broker.close_position(pos_id)
-                    if not res.get("success"):
+                    if res.get("success"):
+                        # IMMEDIATELY mark as closed in DB so UI updates
+                        async with async_session() as db:
+                            db_trades = await crud.get_open_trades_by_external_id(db)
+                            if str(pos_id) in db_trades:
+                                t = db_trades[str(pos_id)]
+                                await crud.close_trade(db, t.id, 0.0, 0.0) # P&L will be filled by next watchers sync
+                                await db.commit()
+                                logger.info(f"  ✅ Trade {t.id} marked as 'closed' in DB.")
+                    else:
                         logger.error(f"Failed to close position {pos_id}: {res.get('error')}")
             except Exception as e:
                 logger.error(f"Error during emergency close of position {pos.get('id')}: {e}")
+        
+        # Finally trigger a reconcile to catch any missing P&L from history
+        logger.info("Reconciling emergency closures for P&L tracking...")
+        await asyncio.sleep(2.0)
+        await self._reconcile_positions(await broker.get_positions(use_cache=False))
 
 # Global Instance
 watcher = MarketWatcher()

@@ -2,13 +2,14 @@
 Trading API Routes — Manual trade controls for the dashboard.
 Requires API Key authentication.
 """
-from fastapi import APIRouter, HTTPException, Depends, Security
+from fastapi import APIRouter, HTTPException, Depends, Security, BackgroundTasks
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
 
 from app.core.broker.metaapi_client import broker
 from app.core.risk.manager import risk_manager
+from app.workers.market_watcher import watcher
 from app.config import settings
 
 # API Key security
@@ -43,7 +44,8 @@ async def execute_trade(order: OrderRequest):
     # We pass 0 for pnl since manual trades override daily limits, 
     # but still check max positions and margin.
     risk_check = risk_manager.check_trade_allowed(
-        order.symbol, account_info, open_positions, 
+        order.symbol, "BUY" if order.direction.upper() == "BUY" else "SELL", 
+        account_info, open_positions, 
         0, 0, account_info.get("equity", 0)
     )
     if not risk_check["allowed"]:
@@ -59,7 +61,7 @@ async def execute_trade(order: OrderRequest):
     return res
 
 @router.post("/close/{position_id}")
-async def close_trade(position_id: str):
+async def close_trade(position_id: str, background_tasks: BackgroundTasks):
     """Manually close an open position."""
     if not broker.is_connected:
         raise HTTPException(status_code=503, detail="Broker not connected")
@@ -67,6 +69,10 @@ async def close_trade(position_id: str):
     res = await broker.close_position(position_id)
     if "error" in res:
         raise HTTPException(status_code=400, detail=res["error"])
+    
+    # Trigger an immediate background cycle to update history and P&L
+    background_tasks.add_task(watcher._run_cycle)
+    
     return res
 
 @router.get("/positions")

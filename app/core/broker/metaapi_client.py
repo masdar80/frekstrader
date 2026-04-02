@@ -425,21 +425,21 @@ class MetaAPIClient:
         return {"error": result.get("error", "Unknown") if result else "No response"}
 
     async def get_history(self, days: int = 30) -> List[Dict[str, Any]]:
-        """Get closed trade history."""
+        """Get closed trade history. Note: For some MT5 accounts, this batch call returns 404/Empty."""
         if not self._connected:
             return []
         
-        # MetaAPI prefers Z suffix and no microseconds sometimes, 
-        # but most reliably works with /history-deals and startTime/endTime params.
         start = datetime.now(timezone.utc) - timedelta(days=days)
-        start_str = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        end_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        start_str = start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         data = await self._get(
             "/history-deals",
             params={
                 "startTime": start_str,
-                "endTime": end_str
+                "endTime": end_str,
+                "from": start_str,
+                "to": end_str
             }
         )
         
@@ -450,7 +450,31 @@ class MetaAPIClient:
                     "position_id": d.get("positionId", ""),
                     "symbol": d.get("symbol", ""),
                     "type": d.get("type", ""),
-                    # entry_type: DEAL_ENTRY_IN, DEAL_ENTRY_OUT, etc.
+                    "entry_type": d.get("entry", ""), 
+                    "volume": d.get("volume", 0),
+                    "price": d.get("price", 0),
+                    "profit": d.get("profit", 0),
+                    "commission": d.get("commission", 0),
+                    "swap": d.get("swap", 0),
+                    "time": d.get("time", ""),
+                }
+                for d in data
+            ]
+        return []
+
+    async def get_deals_by_position(self, position_id: str) -> List[Dict[str, Any]]:
+        """Get all deals for a specific position (MT5 required sometimes)."""
+        if not self._connected:
+            return []
+            
+        data = await self._get(f"/history-deals/position/{position_id}")
+        if data and isinstance(data, list):
+            return [
+                {
+                    "id": d.get("id", ""),
+                    "position_id": d.get("positionId", ""),
+                    "symbol": d.get("symbol", ""),
+                    "type": d.get("type", ""),
                     "entry_type": d.get("entry", ""), 
                     "volume": d.get("volume", 0),
                     "price": d.get("price", 0),

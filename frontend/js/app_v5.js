@@ -562,6 +562,7 @@ async function saveSettings() {
     const trailingEnabled = document.getElementById("trailing-toggle").checked;
     const multiPosEnabled = document.getElementById("multi-pos-toggle").checked;
     const maxRiskAmount = parseFloat(document.getElementById("max-risk-amount").value) || 20.0;
+    const maxOpenPositions = parseInt(document.getElementById("max-open-positions").value) || 15;
     
     // Collect active live pairs
     const pairs = Array.from(document.querySelectorAll('input[name="live-pair"]:checked')).map(cb => cb.value);
@@ -581,6 +582,7 @@ async function saveSettings() {
                 max_risk_amount_usd: maxRiskAmount,
                 trailing_stop_enabled: trailingEnabled,
                 allow_multiple_per_pair: multiPosEnabled,
+                max_open_positions: maxOpenPositions,
                 pairs: pairs
             })
         });
@@ -632,6 +634,12 @@ async function fetchSettings() {
             const riskField = document.getElementById("max-risk-amount");
             if (riskField) {
                 riskField.value = data.max_risk_amount_usd || 20.0;
+            }
+
+            // Sync Max Open Positions
+            const maxPositionsField = document.getElementById("max-open-positions");
+            if (maxPositionsField) {
+                maxPositionsField.value = data.max_open_positions || 15;
             }
 
             // Sync Live Pairs Checkboxes

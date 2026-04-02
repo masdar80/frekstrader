@@ -1,10 +1,21 @@
+import asyncio
+import os
+import sys
 
-import sqlite3
-conn = sqlite3.connect('foreks.db')
-cur = conn.cursor()
-cur.execute("SELECT id, symbol, external_id, volume, opened_at FROM trades WHERE status = 'closed' AND profit = 0.0")
-rows = cur.fetchall()
-print(f"Found {len(rows)} closed trades with 0 profit:")
-for r in rows:
-    print(r)
-conn.close()
+# Add root to path
+sys.path.append(os.getcwd())
+
+from app.db.database import async_session
+from app.db.models import Trade
+from sqlalchemy import select
+
+async def run():
+    async with async_session() as db:
+        res = await db.execute(select(Trade).where(Trade.status == 'open'))
+        trades = res.scalars().all()
+        print(f"Open trades in DB: {len(trades)}")
+        for t in trades:
+            print(f"  - {t.id}: {t.symbol} ({t.external_id})")
+
+if __name__ == "__main__":
+    asyncio.run(run())
