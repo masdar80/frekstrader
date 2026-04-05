@@ -42,7 +42,7 @@ async def get_trade_history(db: AsyncSession, limit: int = 10, offset: int = 0) 
     return result.scalars().all()
 
 
-async def close_trade(db: AsyncSession, trade_id: int, close_price: float, profit: float) -> Trade:
+async def close_trade(db: AsyncSession, trade_id: int, close_price: float, profit: float, close_reason: Optional[str] = None) -> Trade:
     result = await db.execute(select(Trade).where(Trade.id == trade_id))
     trade = result.scalar_one_or_none()
     if trade:
@@ -50,6 +50,8 @@ async def close_trade(db: AsyncSession, trade_id: int, close_price: float, profi
         trade.profit = profit
         trade.status = "closed"
         trade.closed_at = utcnow()
+        if close_reason:
+            trade.close_reason = close_reason
     return trade
 
 

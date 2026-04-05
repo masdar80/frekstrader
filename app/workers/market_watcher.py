@@ -467,9 +467,27 @@ class MarketWatcher:
                         if close_price == 0:
                             close_price = float(matching_deals[-1].get("price", 0) or 0)
                             
-                        logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price}")
+                        # Try to determine close reason
+                        reason = "broker_manual"
+                        is_buy = trade.direction.upper() == "BUY"
+                        tp = trade.take_profit
+                        sl = trade.stop_loss
                         
-                        await crud.close_trade(db, trade.id, close_price, profit)
+                        if tp and close_price > 0:
+                            # 1 pip tolerance
+                            is_jpy = "JPY" in trade.symbol
+                            threshold = 0.02 if is_jpy else 0.0002
+                            if abs(close_price - tp) <= threshold:
+                                reason = "tp"
+                        
+                        if sl and close_price > 0 and reason == "broker_manual":
+                            threshold = 0.02 if "JPY" in trade.symbol else 0.0002
+                            if abs(close_price - sl) <= threshold:
+                                reason = "sl"
+
+                        logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price} (Reason: {reason})")
+                        
+                        await crud.close_trade(db, trade.id, close_price, profit, close_reason=reason)
                         await crud.update_decision_outcome(db, trade.id, profit > 0)
                     else:
                         # Phase 1.5: Retry logic for missing history deals
@@ -543,7 +561,7 @@ class MarketWatcher:
                             db_trades = await crud.get_open_trades_by_external_id(db)
                             if str(pos_id) in db_trades:
                                 t = db_trades[str(pos_id)]
-                                await crud.close_trade(db, t.id, 0.0, 0.0) # P&L will be filled by next watchers sync
+                                await crud.close_trade(db, t.id, 0.0, 0.0, close_reason="emergency") # P&L will be filled by next watchers sync
                                 await db.commit()
                                 logger.info(f"  ✅ Trade {t.id} marked as 'closed' in DB.")
                     else:

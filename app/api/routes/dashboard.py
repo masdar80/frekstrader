@@ -42,7 +42,13 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
         "status": "online",
         "trading_mode": settings.trading_mode.value,
         "account": account_info,
-        "positions": open_positions,
+        "positions": [
+            {
+                **p,
+                "duration_hours": round((time.time() - datetime.fromisoformat(p["open_time"].replace("Z", "+00:00")).timestamp()) / 3600, 2) if p.get("open_time") else 0
+            }
+            for p in open_positions
+        ],
         "metrics": {
             "daily_pnl": daily_pnl,
             "weekly_pnl": weekly_pnl,
@@ -89,6 +95,7 @@ async def get_trade_history_route(limit: int = 10, offset: int = 0, db: AsyncSes
             "profit": t.profit,
             "opened_at": t.opened_at,
             "closed_at": t.closed_at,
+            "close_reason": t.close_reason,
             "trading_mode": t.trading_mode
         }
         for t in trades

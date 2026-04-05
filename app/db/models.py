@@ -26,6 +26,7 @@ class Trade(Base):
     status = Column(String(20), default="open")  # open, closed, cancelled
     opened_at = Column(DateTime, default=utcnow)
     closed_at = Column(DateTime, nullable=True)
+    close_reason = Column(String(50), nullable=True)  # tp, sl, emergency, manual, news
     strategy_version = Column(String(50), nullable=True)
     trading_mode = Column(String(30), nullable=True)
     metadata_json = Column(JSON, nullable=True)
