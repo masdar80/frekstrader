@@ -3,7 +3,10 @@ Dashboard API Routes — Aggregate data for UI.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from typing import List, Dict, Any
+import time
+from datetime import datetime
 
 from app.db.database import get_db
 from app.db import crud
@@ -19,7 +22,11 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
         return {"status": "offline", "error": "Broker not connected"}
         
     account_info = await broker.get_account_info(use_cache=True)
+    # If the market is closed and this is our first run, cache might be empty.
+    # We should fall back to a live fetch if we get no positions.
     open_positions = await broker.get_positions(use_cache=True)
+    if not open_positions:
+        open_positions = await broker.get_positions(use_cache=False)
     daily_pnl = await crud.get_daily_pnl(db)
     weekly_pnl = await crud.get_weekly_pnl(db)
     total_pnl = await crud.get_total_pnl(db)

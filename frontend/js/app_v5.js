@@ -338,8 +338,14 @@ function renderPositions(positions) {
                         </div>
                         <div class="flex justify-end gap-2 mt-1 items-center">
                             <span class="text-[9px] text-gray-500 uppercase">${openTime}</span>
-                            <button onclick="closePosition('${p.id}')" class="bg-red-900/40 hover:bg-red-800 text-red-300 text-[10px] uppercase font-bold px-2 py-0.5 rounded border border-red-800/50 transition-colors">Close</button>
                         </div>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-gray-800/40">
+                    <div class="bg-black/20 rounded-xl p-1.5 border border-gray-800/30 flex justify-between items-center px-3">
+                        <span class="text-[9px] text-gray-500 uppercase font-bold">Duration</span>
+                        <span class="text-[11px] text-accent font-bold">${p.duration_hours || 0}h</span>
                     </div>
                 </div>
                 
@@ -997,12 +1003,13 @@ function renderTradeHistory(trades, append = false) {
     if (!append) {
         // Initial load: create the table structure
         container.innerHTML = `
-            <table class="w-full text-left text-xs bg-transparent">
-                <thead class="text-gray-500 bg-black/20 sticky top-0 uppercase font-bold text-[9px] mb-2 tracking-widest z-10 glass">
+            <table class="w-full text-left text-[10px] bg-transparent">
+                <thead class="text-gray-500 bg-black/20 sticky top-0 uppercase font-bold text-[8px] mb-2 tracking-widest z-10 glass">
                     <tr>
                         <th class="p-2">Time</th>
                         <th class="p-2">Pair</th>
-                        <th class="p-2">Side</th>
+                        <th class="p-2 text-center">Open/Close</th>
+                        <th class="p-2 text-center">Reason</th>
                         <th class="p-2 text-right">P&L</th>
                     </tr>
                 </thead>
@@ -1028,13 +1035,25 @@ function renderTradeHistory(trades, append = false) {
         const pnlStr = (t.profit >= 0 ? "+" : "") + "$" + t.profit.toFixed(2);
         const pnlColor = t.profit >= 0 ? "text-emerald-400" : "text-red-400";
         
+        const reason = t.close_reason || "--";
+        const reasonBadgeClass = reason.toLowerCase() === 'tp' ? 'bg-emerald-900/20 text-emerald-500 border-emerald-800/30' : (reason.toLowerCase() === 'sl' ? 'bg-red-900/20 text-red-500 border-red-800/30' : (reason.toLowerCase() === 'emergency' ? 'bg-orange-900/20 text-orange-500 border-orange-800/30' : 'bg-gray-800 text-gray-500 border-gray-700'));
+        
         const row = document.createElement("tr");
         row.className = "hover:bg-gray-800/30 transition-colors group";
         row.innerHTML = `
             <td class="p-2 text-gray-500 text-[10px] whitespace-nowrap">${timeStr}</td>
-            <td class="p-2 font-bold text-gray-300">${t.symbol}</td>
-            <td class="p-2 font-bold ${dirColor}">${t.direction}</td>
-            <td class="p-2 font-mono font-bold text-right ${pnlColor}">${pnlStr}</td>
+            <td class="p-2">
+                <div class="font-bold text-gray-300 text-[11px]">${t.symbol}</div>
+                <div class="font-bold ${dirColor} text-[9px]">${t.direction}</div>
+            </td>
+            <td class="p-2 text-center text-[10px] font-mono leading-tight">
+                <div class="text-gray-400">${t.open_price.toFixed(5)}</div>
+                <div class="text-gray-500">${t.close_price.toFixed(5)}</div>
+            </td>
+            <td class="p-2 text-center">
+                <span class="px-1.5 py-0.5 rounded text-[8px] font-bold border uppercase tracking-tighter ${reasonBadgeClass}">${reason}</span>
+            </td>
+            <td class="p-2 font-mono font-bold text-right ${pnlColor} text-[11px]">${pnlStr}</td>
         `;
         tableBody.appendChild(row);
     });

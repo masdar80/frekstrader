@@ -86,8 +86,25 @@ class MarketWatcher:
     async def _run_cycle(self):
         # 0. Check Working Hours (respect weekend/custom hours)
         async with async_session() as db:
+            # Check trading hours
             if not await crud.is_market_open(db):
-                logger.info("🕙 Outside of Trading Hours. Resting...")
+                logger.info("🕙 Outside of Trading Hours. Taking snapshot and resting...")
+                # Still take snapshots and sync positions so the dashboard isn't empty on weekends
+                account_info = await broker.get_account_info(use_cache=False)
+                if account_info and not account_info.get("error"):
+                    await crud.create_snapshot(
+                        db,
+                        equity=account_info["equity"],
+                        balance=account_info["balance"],
+                        margin=account_info.get("margin", 0.0) or account_info.get("free_margin", 0.0),
+                        drawdown_pct=account_info.get("drawdown_pct", 0.0),
+                        daily_pnl=await crud.get_daily_pnl(db)
+                    )
+                    await db.commit()
+                
+                # IMPORTANT: Sync positions so they appear in /api/dashboard/summary
+                # even if watcher is resting
+                await broker.get_positions(use_cache=False)
                 return
 
         logger.info(f"--- 🔄 Starting data cycle for {len(settings.pairs_list)} pairs ---")
