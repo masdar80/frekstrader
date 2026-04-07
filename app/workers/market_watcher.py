@@ -187,6 +187,10 @@ class MarketWatcher:
             logger.info(f"📈 Checking trailing stops for {len(open_positions)} positions...")
             await trailing_manager.update_trailing_stops(open_positions, self._candle_cache)
 
+        # 6. Trade Timeout Management (Auto-close stale trades)
+        if open_positions:
+            await self._check_trade_timeouts(open_positions)
+
     async def _refresh_all_sentiment(self):
         """Fetch fresh sentiment for all currencies (runs every 15 min)."""
         if not settings.use_ai_sentiment:
@@ -544,6 +548,40 @@ class MarketWatcher:
                     )
                     
             await db.commit()
+
+    async def _check_trade_timeouts(self, open_positions: List[Dict[str, Any]]):
+        """Close positions that have been open too long (stale trades)."""
+        max_hours = settings.max_trade_hours
+        if max_hours <= 0:
+            return
+
+        for pos in open_positions:
+            open_time_str = pos.get("open_time")
+            if not open_time_str:
+                continue
+
+            try:
+                # MetaAPI returns ISO 8601: "2024-03-24T18:00:00.000Z"
+                open_time = datetime.fromisoformat(open_time_str.replace("Z", "+00:00"))
+                now = utcnow()
+                duration = now - open_time
+                duration_hours = duration.total_seconds() / 3600
+
+                if duration_hours >= max_hours:
+                    pos_id = pos.get("id")
+                    symbol = pos.get("symbol")
+                    logger.critical(f"⏰ STALE TRADE DETECTED: {symbol} (pos:{pos_id}) open for {duration_hours:.1f}h (Limit: {max_hours}h). Closing...")
+                    
+                    res = await broker.close_position(pos_id)
+                    if res.get("success"):
+                        # Reconcile will handle DB update in next sync, 
+                        # but we can proactively log it here
+                        logger.info(f"  ✅ Stale trade closed successfully.")
+                    else:
+                        logger.error(f"  ❌ Failed to close stale trade {pos_id}: {res.get('error')}")
+
+            except Exception as e:
+                logger.error(f"Error checking timeout for position {pos.get('id')}: {e}")
 
     def pause(self):
         """Pauses the market watcher analysis loop."""

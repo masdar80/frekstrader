@@ -20,7 +20,8 @@ class ModeUpdate(BaseModel):
     max_risk_amount_usd: float = 20.0
     trailing_stop_enabled: bool = True
     allow_multiple_per_pair: bool = False
-    max_open_positions: int = 15
+    max_open_positions: int = 5
+    max_trade_hours: float = 96.0
     pairs: List[str] = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF"]
 
 class HourConfig(BaseModel):
@@ -47,6 +48,7 @@ async def update_trading_mode(req: ModeUpdate):
     settings.trailing_stop_enabled = req.trailing_stop_enabled
     settings.allow_multiple_per_pair = req.allow_multiple_per_pair
     settings.max_open_positions = req.max_open_positions
+    settings.max_trade_hours = req.max_trade_hours
     settings.trading_pairs = ",".join([p.upper() for p in req.pairs])
     
     # Ideally save to .env to persist across restarts
@@ -58,6 +60,7 @@ async def update_trading_mode(req: ModeUpdate):
         dotenv.set_key(dotenv_file, "TRAILING_STOP_ENABLED", "true" if req.trailing_stop_enabled else "false")
         dotenv.set_key(dotenv_file, "ALLOW_MULTIPLE_PER_PAIR", "true" if req.allow_multiple_per_pair else "false")
         dotenv.set_key(dotenv_file, "MAX_OPEN_POSITIONS", str(req.max_open_positions))
+        dotenv.set_key(dotenv_file, "MAX_TRADE_HOURS", str(req.max_trade_hours))
         dotenv.set_key(dotenv_file, "TRADING_PAIRS", settings.trading_pairs)
         
     return {
@@ -83,7 +86,8 @@ async def get_settings():
         "max_risk_amount_usd": settings.max_risk_amount_usd,
         "trailing_stop_enabled": settings.trailing_stop_enabled,
         "allow_multiple_per_pair": settings.allow_multiple_per_pair,
-        "max_open_positions": settings.max_open_positions
+        "max_open_positions": settings.max_open_positions,
+        "max_trade_hours": settings.max_trade_hours
     }
 
 

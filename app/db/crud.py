@@ -228,3 +228,53 @@ async def is_market_open(db: AsyncSession) -> bool:
         return False
         
     return hour_conf.open_time <= time_str <= hour_conf.close_time
+
+
+async def get_performance_metrics(db: AsyncSession) -> Dict[str, Any]:
+    """Calculate Win Rate and Sharpe Ratio from history."""
+    # 1. Win Rate
+    res_trades = await db.execute(select(Trade).where(Trade.status == "closed"))
+    closed_trades = res_trades.scalars().all()
+    
+    total = len(closed_trades)
+    wins = len([t for t in closed_trades if (t.profit or 0) > 0])
+    win_rate = (wins / total) if total > 0 else 0.0
+
+    # 2. Sharpe Ratio (Simplified)
+    # Annualized Sharpe = sqrt(252) * [mean(daily_returns) / std(daily_returns)]
+    # We fetch equity snapshots and group by day
+    res_snaps = await db.execute(
+        select(AccountSnapshot).order_by(AccountSnapshot.timestamp.asc())
+    )
+    all_snaps = res_snaps.scalars().all()
+    
+    # Filter to one snapshot per day (last one of the day)
+    daily_equities = {}
+    for s in all_snaps:
+        date_str = s.timestamp.date().isoformat()
+        daily_equities[date_str] = s.equity
+        
+    equity_list = list(daily_equities.values())
+    
+    sharpe_ratio = 0.0
+    if len(equity_list) >= 3: # Need at least 3 days for a standard deviation
+        import numpy as np
+        # Calculate daily % returns
+        returns = []
+        for i in range(1, len(equity_list)):
+            prev = equity_list[i-1]
+            curr = equity_list[i]
+            if prev > 0:
+                returns.append((curr - prev) / prev)
+        
+        if returns and np.std(returns) > 0:
+            avg_return = np.mean(returns)
+            std_return = np.std(returns)
+            # 252 trading days in a year
+            sharpe_ratio = (avg_return / std_return) * np.sqrt(252)
+            
+    return {
+        "win_rate": round(win_rate * 100, 2),
+        "total_trades": total,
+        "sharpe_ratio": round(sharpe_ratio, 3)
+    }
