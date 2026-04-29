@@ -20,17 +20,22 @@ class Backtester:
         self.open_trades = []
         self.closed_trades = []
 
-    async def run_portfolio(self, symbols: List[str], days: int = 90) -> BacktestResult:
-        """Run a synchronized replay of multiple symbols."""
-        logger.info(f"📁 Starting Portfolio Backtest for {symbols}...")
+    async def run_portfolio(self, symbols: List[str], days: int = 90, config: Any = None, candle_cache: Dict[str, Any] = None) -> (BacktestResult, Dict[str, Any]):
+        """Run a synchronized replay of multiple symbols with config overrides."""
+        if config is None:
+            from app.core.backtest.backtest_config import BacktestConfig
+            config = BacktestConfig()
+            
+        logger.info(f"Starting Backtest '{config.name}' for {symbols}...")
         
         # Reset state
         self.open_trades = []
         self.closed_trades = []
-        balance = self.initial_balance
+        balance = config.initial_balance
+        self.initial_balance = balance
         
-        # 1. Fetch Symbol Data & Find Common Timeframe
-        candle_data = {}
+        # 1. Fetch Symbol Data & Find Common Timeframe (or use cache)
+        candle_data = candle_cache if candle_cache else {}
         symbol_meta = {}
         
         for symbol in symbols:
@@ -42,34 +47,54 @@ class Backtester:
                 "is_jpy": "JPY" in symbol
             }
             
-            # Fetch 1h candles for replay clock
-            candles_1h = await broker.get_candles(symbol, timeframe="1h", count=2000)
-            if not candles_1h: continue
-            df_1h = pd.DataFrame(candles_1h)
-            df_1h["time"] = pd.to_datetime(df_1h["time"])
-            df_1h.set_index("time", inplace=True)
-            candle_data[symbol] = {"1h": df_1h}
-            
-            # Fetch other timeframes for analysis
-            for tf in ["15m", "4h", "1d"]:
-                candles = await broker.get_candles(symbol, timeframe=tf, count=2000)
-                df = pd.DataFrame(candles)
-                df["time"] = pd.to_datetime(df["time"])
-                df.set_index("time", inplace=True)
-                candle_data[symbol][tf] = df
+            if not candle_cache:
+                logger.info(f"  Fetching candles for {symbol}...")
+                symbol_candles = {}
+                
+                # Fetch timeframes with small delays to avoid 429
+                for tf in ["1h", "15m", "4h", "1d"]:
+                    for attempt in range(3):
+                        candles = await broker.get_candles(symbol, timeframe=tf, count=2000)
+                        if candles:
+                            df = pd.DataFrame(candles)
+                            if not df.empty and "time" in df.columns:
+                                df["time"] = pd.to_datetime(df["time"])
+                                df.set_index("time", inplace=True)
+                                symbol_candles[tf] = df
+                                break
+                        
+                        logger.warning(f"    [!] Failed to fetch {tf} for {symbol} (attempt {attempt+1}/3). Retrying...")
+                        await asyncio.sleep(5)
+                    
+                    await asyncio.sleep(1) # Gap between timeframes
+                
+                if "1h" in symbol_candles:
+                    # Precompute indicators for all timeframes
+                    for tf in symbol_candles:
+                        symbol_candles[tf] = technical_analyzer.precompute(symbol_candles[tf])
+                    candle_data[symbol] = symbol_candles
+                
+                await asyncio.sleep(2) # Gap between symbols
 
         # 2. Get the Replay Clock (Union of all symbols' 1h timestamps)
         all_times = pd.Index([])
         for symbol in symbols:
             if symbol in candle_data:
                 all_times = all_times.union(candle_data[symbol]["1h"].index)
+        
+        if all_times.empty:
+            logger.error("No candle data fetched. Backtest aborted.")
+            return None, candle_data
+            
         all_times = sorted(all_times)[-days*24:] # Limit to requested days
         
         result = BacktestResult(
             symbol="PORTFOLIO",
             start_date=all_times[0].isoformat(),
             end_date=all_times[-1].isoformat(),
-            trading_mode=settings.trading_mode.value
+            trading_mode=config.name,
+            config_name=config.name,
+            config_dict=config.to_dict()
         )
         
         # 3. Synchronized Replay Loop
@@ -86,9 +111,9 @@ class Backtester:
                 # Check Closures & Manage Trailing
                 trades_to_close = self._manage_trades_for_symbol(
                     symbol, current_time, bar, meta,
-                    settings.trailing_stop_enabled,
-                    settings.trailing_breakeven_atr_mult,
-                    settings.trailing_atr_mult
+                    config.trailing_stop_enabled,
+                    config.trailing_breakeven_atr_mult,
+                    config.trailing_atr_mult
                 )
                 for t in trades_to_close:
                     balance += t.profit
@@ -105,36 +130,37 @@ class Backtester:
             result.equity_curve.append({"time": current_time.isoformat(), "equity": round(equity, 2)})
 
             # C. Check for new entries for each symbol
-            if len(self.open_trades) < settings.max_open_positions:
+            if len(self.open_trades) < config.max_open_positions:
                 for symbol in symbols:
                     if symbol not in candle_data or current_time not in candle_data[symbol]["1h"].index: 
                         continue
                     
                     # Ensure we don't double-dip on the same symbol unless allowed
-                    if not settings.allow_multiple_per_pair and any(t["symbol"] == symbol for t in self.open_trades):
+                    if not config.allow_multiple_per_pair and any(t["symbol"] == symbol for t in self.open_trades):
                         continue
 
-                    # Slice data for analysis
-                    sliced_candles = {}
-                    for tf, df_tf in candle_data[symbol].items():
-                        df_slice = df_tf[df_tf.index <= current_time].tail(200)
-                        sliced_candles[tf] = df_slice.reset_index().to_dict('records')
-
-                    ta_results = technical_analyzer.analyze(sliced_candles)
+                    # Fast Analysis using precomputed row
+                    ta_results = technical_analyzer.analyze_row(candle_data[symbol], current_time)
                     ta_confluence = technical_analyzer.get_confluence_score(ta_results)
                     signal = normalize_technical_signals(symbol, ta_confluence)
-                    decision = decision_engine.evaluate_signals(symbol, [signal])
+                    
+                    # USE CONFIG OVERRIDES FOR BRAIN
+                    decision = decision_engine.evaluate_signals_with_config(
+                        symbol, [signal], 
+                        confidence_threshold=config.confidence_threshold,
+                        tech_weight=config.tech_weight
+                    )
                     
                     if decision.action in ["BUY", "SELL"]:
                         meta = symbol_meta[symbol]
                         cur_p = current_prices[symbol]
                         
                         # Risk Math
-                        risk_pct = settings.effective_max_risk_pct / 100.0
-                        risk_amount = min(balance * risk_pct, settings.max_risk_amount_usd)
+                        risk_pct = config.max_risk_pct / 100.0
+                        risk_amount = min(balance * risk_pct, config.max_risk_amount_usd)
                         
                         atr_val = ta_results["ATR"][-1].value if "ATR" in ta_results else (meta["point"] * 15)
-                        dist_sl = atr_val * 2.0
+                        dist_sl = atr_val * config.sl_atr_multiplier
                         sl_points = dist_sl / meta["point"]
                         
                         tick_val_usd = (meta["point"] * meta["contract_size"])
@@ -144,7 +170,8 @@ class Backtester:
                         
                         is_buy = decision.action == "BUY"
                         sl_price = round(cur_p - dist_sl if is_buy else cur_p + dist_sl, meta["digits"])
-                        tp_price = round(cur_p + (dist_sl * 2) if is_buy else cur_p - (dist_sl * 2), meta["digits"])
+                        # USE CONFIG RR RATIO
+                        tp_price = round(cur_p + (dist_sl * config.tp_rr_ratio) if is_buy else cur_p - (dist_sl * config.tp_rr_ratio), meta["digits"])
                         
                         self.open_trades.append({
                             "symbol": symbol,
@@ -161,7 +188,7 @@ class Backtester:
 
         result.trades = sorted(self.closed_trades, key=lambda x: x.open_time)
         result.calculate_metrics(self.initial_balance)
-        return result
+        return result, candle_data
 
     def _calculate_overall_unrealized(self, prices, metas) -> float:
         pnl = 0.0
@@ -234,6 +261,7 @@ class Backtester:
 
     async def run(self, symbol: str, days: int = 90) -> BacktestResult:
         """Compatibility wrapper for single symbol."""
-        return await self.run_portfolio([symbol], days)
+        res, _ = await self.run_portfolio([symbol], days)
+        return res
 
 backtester = Backtester()

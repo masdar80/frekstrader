@@ -14,7 +14,7 @@ console_handler.setLevel(logging.INFO)
 
 # Format
 formatter = logging.Formatter(
-    "%(asctime)s │ %(levelname)-8s │ %(name)s │ %(message)s",
+    "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 console_handler.setFormatter(formatter)

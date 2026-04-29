@@ -39,7 +39,7 @@ class TechnicalAnalyzer:
 
         for tf, candles in candles_by_tf.items():
             if not candles or len(candles) < 50:
-                logger.warning(f"Not enough candles for {tf} (got {len(candles)})")
+                # logger.warning(f"Not enough candles for {tf} (got {len(candles)})")
                 continue
 
             df = self._candles_to_df(candles)
@@ -52,6 +52,165 @@ class TechnicalAnalyzer:
                     all_results[result.name] = []
                 all_results[result.name].append(result)
 
+        return all_results
+
+    def precompute(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate all indicators for the entire DataFrame at once."""
+        if df is None or df.empty: return df
+        
+        # RSI
+        df["ta_rsi"] = ta.rsi(df["close"], length=14)
+        
+        # MACD
+        macd = ta.macd(df["close"], fast=12, slow=26, signal=9)
+        if macd is not None:
+            df["ta_macd"] = macd.iloc[:, 0]
+            df["ta_macd_hist"] = macd.iloc[:, 1]
+            df["ta_macd_signal"] = macd.iloc[:, 2]
+            
+        # EMA
+        df["ta_ema20"] = ta.ema(df["close"], length=20)
+        df["ta_ema50"] = ta.ema(df["close"], length=50)
+        df["ta_ema200"] = ta.ema(df["close"], length=200) if len(df) >= 200 else None
+        
+        # Bollinger
+        bb = ta.bbands(df["close"], length=20, std=2)
+        if bb is not None:
+            df["ta_bb_lower"] = bb.iloc[:, 0]
+            df["ta_bb_mid"] = bb.iloc[:, 1]
+            df["ta_bb_upper"] = bb.iloc[:, 2]
+            
+        # ATR
+        df["ta_atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+        
+        # Stoch
+        stoch = ta.stoch(df["high"], df["low"], df["close"], k=14, d=3)
+        if stoch is not None:
+            df["ta_stoch_k"] = stoch.iloc[:, 0]
+            df["ta_stoch_d"] = stoch.iloc[:, 1]
+            
+        # ADX
+        adx = ta.adx(df["high"], df["low"], df["close"], length=14)
+        if adx is not None:
+            df["ta_adx"] = adx.iloc[:, 0]
+            df["ta_adx_pos"] = adx.iloc[:, 1]
+            df["ta_adx_neg"] = adx.iloc[:, 2]
+            
+        return df
+
+    def analyze_row(self, df_by_tf: Dict[str, pd.DataFrame], timestamp: pd.Timestamp) -> Dict[str, List[IndicatorResult]]:
+        """Fast lookup of precomputed indicators for a specific time."""
+        all_results = {}
+        
+        for tf, df in df_by_tf.items():
+            # Find the latest available bar at or before timestamp
+            if timestamp in df.index:
+                row_idx = df.index.get_loc(timestamp)
+            else:
+                # Find nearest previous
+                past_df = df[df.index <= timestamp]
+                if past_df.empty: continue
+                row_idx = len(past_df) - 1
+            
+            row = df.iloc[row_idx]
+            prev_row = df.iloc[row_idx-1] if row_idx > 0 else row
+            
+            # 1. RSI
+            if not pd.isna(row.get("ta_rsi")):
+                val = float(row["ta_rsi"])
+                if val < 30: signal, strength = "BUY", min(1.0, (30 - val) / 30)
+                elif val > 70: signal, strength = "SELL", min(1.0, (val - 70) / 30)
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("RSI", tf, round(val, 2), signal, round(strength, 3), 
+                                      {"period": 14, "prev_value": round(float(prev_row.get("ta_rsi", val)), 2)})
+                if "RSI" not in all_results: all_results["RSI"] = []
+                all_results["RSI"].append(res)
+                
+            # 2. MACD
+            if not pd.isna(row.get("ta_macd_hist")):
+                hist = float(row["ta_macd_hist"])
+                prev_hist = float(prev_row.get("ta_macd_hist", 0))
+                if hist > 0 and prev_hist <= 0: signal, strength = "BUY", 0.8
+                elif hist < 0 and prev_hist >= 0: signal, strength = "SELL", 0.8
+                elif hist > 0: signal, strength = "BUY", min(0.6, abs(hist) * 100)
+                elif hist < 0: signal, strength = "SELL", min(0.6, abs(hist) * 100)
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("MACD", tf, round(hist, 6), signal, round(strength, 3),
+                                      {"macd": round(row["ta_macd"], 6), "signal": round(row["ta_macd_signal"], 6), "histogram": round(hist, 6)})
+                if "MACD" not in all_results: all_results["MACD"] = []
+                all_results["MACD"].append(res)
+                
+            # 3. EMA Cross & Trend
+            if not pd.isna(row.get("ta_ema50")):
+                e20, e50 = float(row["ta_ema20"]), float(row["ta_ema50"])
+                price = float(row["close"])
+                if e20 > e50 and price > e20: signal, strength = "BUY", 0.7
+                elif e20 < e50 and price < e20: signal, strength = "SELL", 0.7
+                elif price > e20: signal, strength = "BUY", 0.4
+                elif price < e20: signal, strength = "SELL", 0.4
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("EMA_CROSS", tf, round(e20, 6), signal, round(strength, 3), {"ema20": round(e20, 6), "ema50": round(e50, 6), "price": price})
+                if "EMA_CROSS" not in all_results: all_results["EMA_CROSS"] = []
+                all_results["EMA_CROSS"].append(res)
+                
+                if not pd.isna(row.get("ta_ema200")):
+                    e200 = float(row["ta_ema200"])
+                    sig, strn = ("BUY", 0.5) if price > e200 else ("SELL", 0.5)
+                    res2 = IndicatorResult("EMA200_TREND", tf, round(e200, 6), sig, round(strn, 3), {"ema200": round(e200, 6), "price": price})
+                    if "EMA200_TREND" not in all_results: all_results["EMA200_TREND"] = []
+                    all_results["EMA200_TREND"].append(res2)
+
+            # 4. BBANDS
+            if not pd.isna(row.get("ta_bb_upper")):
+                low, up = float(row["ta_bb_lower"]), float(row["ta_bb_upper"])
+                price = float(row["close"])
+                width = up - low
+                pos = (price - low) / width if width > 0 else 0.5
+                if pos <= 0.1: signal, strength = "BUY", 0.8
+                elif pos >= 0.9: signal, strength = "SELL", 0.8
+                elif pos < 0.3: signal, strength = "BUY", 0.4
+                elif pos > 0.7: signal, strength = "SELL", 0.4
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("BBANDS", tf, round(pos, 3), signal, round(strength, 3), {"upper": round(up, 6), "lower": round(low, 6), "position": round(pos, 3)})
+                if "BBANDS" not in all_results: all_results["BBANDS"] = []
+                all_results["BBANDS"].append(res)
+                
+            # 5. ATR
+            if not pd.isna(row.get("ta_atr")):
+                val = float(row["ta_atr"])
+                res = IndicatorResult("ATR", tf, round(val, 6), "NEUTRAL", 0.0, {"atr": round(val, 6)})
+                if "ATR" not in all_results: all_results["ATR"] = []
+                all_results["ATR"].append(res)
+                
+            # 6. STOCH
+            if not pd.isna(row.get("ta_stoch_k")):
+                k, d = float(row["ta_stoch_k"]), float(row["ta_stoch_d"])
+                if k < 20 and d < 20: signal, strength = "BUY", 0.7
+                elif k > 80 and d > 80: signal, strength = "SELL", 0.7
+                elif k < 30: signal, strength = "BUY", 0.4
+                elif k > 70: signal, strength = "SELL", 0.4
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("STOCH", tf, round(k, 2), signal, round(strength, 3), {"k": round(k, 2), "d": round(d, 2)})
+                if "STOCH" not in all_results: all_results["STOCH"] = []
+                all_results["STOCH"].append(res)
+                
+            # 7. ADX
+            if not pd.isna(row.get("ta_adx")):
+                adx, p, n = float(row["ta_adx"]), float(row["ta_adx_pos"]), float(row["ta_adx_neg"])
+                if adx > 25:
+                    if p > n: signal, strength = "BUY", min(1.0, adx / 50)
+                    else: signal, strength = "SELL", min(1.0, adx / 50)
+                else: signal, strength = "NEUTRAL", 0.0
+                
+                res = IndicatorResult("ADX", tf, round(adx, 2), signal, round(strength, 3), {"adx": round(adx, 2), "plus_di": round(p, 2), "minus_di": round(n, 2)})
+                if "ADX" not in all_results: all_results["ADX"] = []
+                all_results["ADX"].append(res)
+                
         return all_results
 
     def _candles_to_df(self, candles: List[Dict]) -> Optional[pd.DataFrame]:

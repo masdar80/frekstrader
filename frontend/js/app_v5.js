@@ -1530,3 +1530,71 @@ if (originalRenderTradeHistory) {
         if (activeFSWidget === 'history') updateFullscreenContent();
     };
 }
+
+/**
+ * Reset all UI settings to the winning 'Aggressive' configuration
+ */
+function loadWinningSettings() {
+    if (!confirm("Restore optimized 'Aggressive Runner' winning settings?")) return;
+
+    // 1. Set Slider to Aggressive (Index 3)
+    const slider = document.getElementById("mode-slider");
+    if (slider) {
+        slider.value = 3;
+        slider.dispatchEvent(new Event('input'));
+    }
+
+    // 2. Set Toggles
+    const aiToggle = document.getElementById("ai-toggle");
+    if (aiToggle) aiToggle.checked = true;
+
+    const trailingToggle = document.getElementById("trailing-toggle");
+    if (trailingToggle) trailingToggle.checked = true;
+
+    const multiPosToggle = document.getElementById("multi-pos-toggle");
+    if (multiPosToggle) multiPosToggle.checked = true;
+
+    // 3. Set Numeric Inputs
+    const riskField = document.getElementById("max-risk-amount");
+    if (riskField) riskField.value = 10.0;
+
+    const maxPosField = document.getElementById("max-pos-input");
+    if (maxPosField) maxPosField.value = 15;
+    
+    const maxOpenField = document.getElementById("max-open-positions");
+    if (maxOpenField) maxOpenField.value = 15;
+
+    // 4. Select All Pairs
+    document.querySelectorAll('input[name="live-pair"]').forEach(cb => cb.checked = true);
+
+    console.log("Winning settings loaded into UI. User must click Apply to save.");
+}
+
+/**
+ * Wipe all historical data from the database
+ */
+async function purgeSystemData() {
+    if (!confirm("⚠️ DANGER: Are you sure you want to WIPE ALL TRADING DATA? This cannot be undone.")) return;
+    if (!confirm("Final Confirmation: Delete all history, decisions, and signals?")) return;
+
+    const key = await getApiKeyForAction("purging all data");
+    if (!key) return;
+
+    try {
+        const res = await fetch("/api/emergency/purge-data", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-Key": key }
+        });
+
+        if (res.ok) {
+            alert("System data purged successfully. Dashboard will refresh.");
+            window.location.reload();
+        } else {
+            const data = await res.json();
+            alert(`Purge failed: ${data.detail || "Unknown error"}. Make sure trading is PAUSED first.`);
+        }
+    } catch(e) {
+        console.error("Purge Error:", e);
+        alert("Network error during purge.");
+    }
+}

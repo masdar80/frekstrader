@@ -42,7 +42,7 @@ class MetaAPIClient:
             account_id = settings.metaapi_account_id
 
             if not token or not account_id or account_id == "put_your_metaapi_account_id_here":
-                logger.error("❌ MetaAPI token or account ID not configured")
+                logger.error("[ERROR] MetaAPI token or account ID not configured")
                 return False
 
             self._headers = {
@@ -60,11 +60,11 @@ class MetaAPIClient:
                     timeout=10.0
                 )
             except Exception as e:
-                logger.error(f"❌ Provisioning API error: {e}")
+                logger.error(f"[ERROR] Provisioning API error: {e}")
                 return False
 
             if resp.status_code != 200:
-                logger.error(f"❌ Failed to fetch account: {resp.status_code} {resp.text[:200]}")
+                logger.error(f"[ERROR] Failed to fetch account: {resp.status_code} {resp.text[:200]}")
                 return False
 
             account_data = resp.json()
@@ -82,7 +82,7 @@ class MetaAPIClient:
                     f"{PROVISIONING_URL}/users/current/accounts/{account_id}/deploy"
                 )
                 if deploy_resp.status_code not in (200, 204):
-                    logger.error(f"❌ Deploy failed: {deploy_resp.text[:200]}")
+                    logger.error(f"[ERROR] Deploy failed: {deploy_resp.text[:200]}")
                     return False
 
                 # Wait for deployment
@@ -94,7 +94,7 @@ class MetaAPIClient:
                     if check.status_code == 200 and check.json().get("state") == "DEPLOYED":
                         break
                 else:
-                    logger.error("❌ Account deployment timed out")
+                    logger.error("[ERROR] Account deployment timed out")
                     return False
 
             # Set the client API base URL based on region
@@ -112,7 +112,7 @@ class MetaAPIClient:
                     )
                     if test_resp.status_code == 200:
                         price = test_resp.json()
-                        logger.info(f"  ✅ Connection verified! EURUSD: {price.get('bid')}/{price.get('ask')}")
+                        logger.info(f"  [OK] Connection verified! EURUSD: {price.get('bid')}/{price.get('ask')}")
                         self._connected = True
                         return True
                     elif test_resp.status_code == 504:
@@ -131,7 +131,7 @@ class MetaAPIClient:
             return True
 
         except Exception as e:
-            logger.error(f"❌ MetaAPI connection failed: {e}")
+            logger.error(f"[ERROR] MetaAPI connection failed: {e}")
             self._connected = False
             return False
 
@@ -167,14 +167,14 @@ class MetaAPIClient:
                     elif resp.status_code in (429, 500, 502, 503, 504):
                         # Exponential backoff: 2s, 4s, 8s with jitter
                         wait = (2 ** (attempt + 1)) + (time.time() % 1)
-                        logger.warning(f"⚠️ API {path} {resp.status_code}. Retrying in {wait:.1f}s... ({attempt+1}/{max_retries})")
+                        logger.warning(f"[WARN] API {path} {resp.status_code}. Retrying in {wait:.1f}s... ({attempt+1}/{max_retries})")
                         await asyncio.sleep(wait)
                     else:
-                        logger.warning(f"❌ API {path} returned {resp.status_code}: {resp.text[:200]}")
+                        logger.warning(f"[ERROR] API {path} returned {resp.status_code}: {resp.text[:200]}")
                         return None
                 except Exception as e:
                     wait = (2 ** (attempt + 1)) + (time.time() % 1)
-                    logger.warning(f"⚠️ API {path} error: {e}. Retrying in {wait:.1f}s...")
+                    logger.warning(f"[WARN] API {path} error: {e}. Retrying in {wait:.1f}s...")
                     await asyncio.sleep(wait)
         return None
 
@@ -199,13 +199,13 @@ class MetaAPIClient:
                         return resp.json()
                     elif resp.status_code == 429:
                         wait = 5.0 + (attempt * 5)
-                        logger.warning(f"⚠️ Rate limited on POST {path}. Retrying in {wait}s...")
+                        logger.warning(f"[WARN] Rate limited on POST {path}. Retrying in {wait}s...")
                         await asyncio.sleep(wait)
                     else:
-                        logger.warning(f"❌ API POST {path} returned {resp.status_code}: {resp.text[:200]}")
+                        logger.warning(f"[ERROR] API POST {path} returned {resp.status_code}: {resp.text[:200]}")
                         return {"error": resp.text[:200]}
                 except Exception as e:
-                    logger.error(f"⚠️ API POST {path} error: {e}")
+                    logger.error(f"[WARN] API POST {path} error: {e}")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2)
                     else:
@@ -224,16 +224,32 @@ class MetaAPIClient:
 
         data = await self._get("/account-information")
         if data and "error" not in data:
-            self._last_account_info = {
-                "balance": data.get("balance", 0),
-                "equity": data.get("equity", 0),
-                "margin": data.get("margin", 0),
-                "free_margin": data.get("freeMargin", 0),
-                "leverage": data.get("leverage", 0),
-                "currency": data.get("currency", "USD"),
-                "server": data.get("server", ""),
-                "platform": data.get("platform", "mt5"),
-            }
+            # Phase 4: Mock account balance for testing on large demo accounts
+            mock_bal = getattr(settings, "mock_balance_usd", 0.0)
+            
+            if mock_bal > 0:
+                self._last_account_info = {
+                    "balance": mock_bal,
+                    "equity": mock_bal + data.get("profit", 0), # Simple estimation
+                    "margin": data.get("margin", 0),
+                    "free_margin": mock_bal - data.get("margin", 0),
+                    "leverage": data.get("leverage", 0),
+                    "currency": data.get("currency", "USD"),
+                    "server": data.get("server", ""),
+                    "platform": data.get("platform", "mt5"),
+                    "is_mocked": True
+                }
+            else:
+                self._last_account_info = {
+                    "balance": data.get("balance", 0),
+                    "equity": data.get("equity", 0),
+                    "margin": data.get("margin", 0),
+                    "free_margin": data.get("freeMargin", 0),
+                    "leverage": data.get("leverage", 0),
+                    "currency": data.get("currency", "USD"),
+                    "server": data.get("server", ""),
+                    "platform": data.get("platform", "mt5"),
+                }
             self._last_account_update = time.time()
             return self._last_account_info
             
@@ -375,7 +391,7 @@ class MetaAPIClient:
         result = await self._post("/trade", json_data=order_data)
 
         if result and "error" not in result:
-            logger.info(f"📊 Order placed: {direction} {volume} {symbol}")
+            logger.info(f"[INFO] Order placed: {direction} {volume} {symbol}")
             return {
                 "success": True,
                 "order_id": result.get("orderId", ""),
@@ -383,7 +399,7 @@ class MetaAPIClient:
             }
         else:
             error_msg = result.get("error", "Unknown error") if result else "No response"
-            logger.error(f"❌ Order failed: {error_msg}")
+            logger.error(f"[ERROR] Order failed: {error_msg}")
             return {"error": error_msg}
 
     async def close_position(self, position_id: str) -> Dict[str, Any]:
@@ -397,7 +413,7 @@ class MetaAPIClient:
         })
 
         if result and "error" not in result:
-            logger.info(f"📊 Position closed: {position_id}")
+            logger.info(f"[INFO] Position closed: {position_id}")
             return {"success": True, "result": result}
         return {"error": result.get("error", "Unknown") if result else "No response"}
 

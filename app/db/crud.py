@@ -278,3 +278,13 @@ async def get_performance_metrics(db: AsyncSession) -> Dict[str, Any]:
         "total_trades": total,
         "sharpe_ratio": round(sharpe_ratio, 3)
     }
+
+
+async def purge_all_trading_data(db: AsyncSession):
+    """Purge all trading-related data for a fresh start."""
+    from sqlalchemy import delete
+    await db.execute(delete(Signal))
+    await db.execute(delete(Decision))
+    await db.execute(delete(AccountSnapshot))
+    await db.execute(delete(Trade))
+    await db.flush()

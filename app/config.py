@@ -51,26 +51,27 @@ class Settings(BaseSettings):
 
     # === Trading ===
     trading_pairs: str = "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCHF"
-    trading_mode: TradingMode = TradingMode.BALANCED
+    trading_mode: TradingMode = TradingMode.AGGRESSIVE
     use_ai_sentiment: bool = True
 
     # === Risk Management ===
-    max_risk_per_trade_pct: float = 1.5
-    max_daily_loss_pct: float = 3.0
-    max_weekly_loss_pct: float = 7.0
-    max_open_positions: int = 5
-    max_drawdown_pct: float = 10.0
-    news_blackout_minutes: int = 30
-    drawdown_circuit_breaker_pct: float = 10.0
+    max_risk_per_trade_pct: float = 2.5
+    max_daily_loss_pct: float = 5.0
+    max_weekly_loss_pct: float = 10.0
+    max_open_positions: int = 15
+    max_drawdown_pct: float = 30.0
+    news_blackout_minutes: int = 15
+    drawdown_circuit_breaker_pct: float = 30.0
     max_slippage_pips: float = 3.0
-    max_risk_amount_usd: float = 20.0  # Phase 1.3: Hard cap on trade loss
-    allow_multiple_per_pair: bool = False  # If True, can open 2+ positions on same pair
+    max_risk_amount_usd: float = 10.0  # Phase 1.3: Hard cap on trade loss
+    allow_multiple_per_pair: bool = True  # If True, can open 2+ positions on same pair
     max_trade_hours: float = 96.0          # Phase 3: Auto-close stale trades
+    mock_balance_usd: float = 200.0        # Simulate a small account for testing
 
     # === Trailing Stop Loss (Phase 2) ===
     trailing_stop_enabled: bool = True
     trailing_breakeven_atr_mult: float = 1.0  # Move SL to breakeven at 1.0x ATR profit
-    trailing_atr_mult: float = 1.5           # Trail behind price at 1.5x ATR distance
+    trailing_atr_mult: float = 1.0           # Trail behind price at 1.0x ATR distance (Winning settings)
 
     # === Server ===
     app_host: str = "0.0.0.0"
