@@ -24,6 +24,7 @@ class RiskManager:
         daily_pnl: float,
         weekly_pnl: float,
         peak_equity: float,
+        current_price: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Runs all risk checks before allowing a trade to execute.
@@ -38,11 +39,38 @@ class RiskManager:
             return {"allowed": False, "reason": f"Max open positions reached ({settings.max_open_positions})"}
 
         # Check 2: Already holding this currency pair?
-        if not settings.allow_multiple_per_pair:
-            symbols_held = [p.get("symbol", "") for p in open_positions]
-            if symbol in symbols_held:
+        same_pair_positions = [p for p in open_positions if p.get("symbol", "") == symbol]
+        if same_pair_positions:
+            if not settings.allow_multiple_per_pair:
                 # Simple rule: 1 position per pair at a time max
                 return {"allowed": False, "reason": f"Already holding {symbol}"}
+            else:
+                # Anti-Spam Check: Cooldown and Distance
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                is_jpy = "JPY" in symbol
+                pip_multiplier = 100 if is_jpy else 10000
+                
+                for p in same_pair_positions:
+                    # Time Check
+                    open_time_str = p.get("open_time")
+                    if open_time_str:
+                        try:
+                            # Parse '2024-03-24T18:00:00.000Z'
+                            open_time = datetime.fromisoformat(open_time_str.replace("Z", "+00:00"))
+                            hours_since = (now - open_time).total_seconds() / 3600
+                            if hours_since < getattr(settings, "multi_pair_cooldown_hours", 4.0):
+                                return {"allowed": False, "reason": f"Cooldown active for {symbol} ({hours_since:.1f}h < {getattr(settings, 'multi_pair_cooldown_hours', 4.0)}h)"}
+                        except Exception as e:
+                            logger.error(f"Error parsing time for cooldown check: {e}")
+                    
+                    # Distance Check
+                    open_price = p.get("openPrice") or p.get("price") or 0.0
+                    if open_price > 0 and current_price > 0:
+                        dist_pips = abs(current_price - open_price) * pip_multiplier
+                        min_dist = getattr(settings, "multi_pair_min_distance_pips", 10.0)
+                        if dist_pips < min_dist:
+                            return {"allowed": False, "reason": f"Distance too close for {symbol} ({dist_pips:.1f} pips < {min_dist} pips)"}
 
         # Check 2.5: Correlation exposure
         base_ccy = symbol[:3]

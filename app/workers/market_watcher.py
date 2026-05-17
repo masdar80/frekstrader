@@ -10,7 +10,7 @@ v2 — Performance improvements:
 """
 import asyncio
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
 from app.config import settings
@@ -47,6 +47,10 @@ class MarketWatcher:
         self._candle_cache_ttl = 300      # 5 minute candle cache
         self._peak_equity: float = 0.0    # Tracked persistently
         self._broker_semaphore = asyncio.Semaphore(3)  # Max 3 concurrent broker requests
+        self._trades_this_cycle: int = 0
+        self._max_trades_per_cycle: int = 2
+        self._last_trade_time: float = 0.0
+        self._min_trade_gap_seconds: float = 120.0
 
     async def start(self):
         self.is_running = True
@@ -165,17 +169,22 @@ class MarketWatcher:
             self._last_sentiment_run = now
 
         # 4. Process all pairs SEQUENTIALLY with delays (to prevent 429)
+        self._trades_this_cycle = 0  # Reset burst counter each cycle
         for symbol in settings.pairs_list:
             if not self.is_running or self.is_paused:
                 break
-                
+
+            # Burst guard: stop opening new trades once cycle limit is hit
+            if self._trades_this_cycle >= self._max_trades_per_cycle:
+                logger.warning(f"  Burst guard: Max {self._max_trades_per_cycle} trades/cycle reached. Skipping {symbol}.")
+                continue
+
             try:
                 await self._analyze_and_trade_symbol(
                     symbol, account_info, open_positions,
                     daily_pnl, weekly_pnl, self._peak_equity,
                     cross_rates
                 )
-                # Small stagger delay between symbols
                 await asyncio.sleep(2.0)
             except Exception as e:
                 logger.error(f"Error processing {symbol}: {e}")
@@ -298,110 +307,123 @@ class MarketWatcher:
 
             if decision.action in ["BUY", "SELL"]:
                 # Check Spread (protect against news spikes)
-                typical_spread_points = symbol_info.get("spread", 0)
-                point_value = symbol_info.get("point", 0.00001)
-                current_spread_points = current_spread / point_value if point_value else 0
-                
-                spread_ok = True
-                if current_spread_points > max(50, typical_spread_points * 2):
-                    spread_ok = False
-                    decision.action = "REJECT"
-                    decision.reasoning += f" | Spread too high: {current_spread_points:.1f} pts (typical: {typical_spread_points})"
-                    logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts")
-
-                if spread_ok:
-                    # Check Economic Calendar
-                    calendar_check = await economic_calendar.is_safe_to_trade(symbol)
-                    if not calendar_check["safe"]:
+                    typical_spread_points = symbol_info.get("spread", 0)
+                    point_value = symbol_info.get("point", 0.00001)
+                    current_spread_points = current_spread / point_value if point_value else 0
+                    
+                    spread_ok = True
+                    if current_spread_points > max(50, typical_spread_points * 2):
+                        spread_ok = False
                         decision.action = "REJECT"
-                        decision.reasoning += f" | Calendar blocked: {calendar_check['reason']}"
-                        logger.warning(f"  ❌ Calendar blocked {symbol}: {calendar_check['reason']}")
-                    else:
-                        # Check Risk
-                        risk_check = risk_manager.check_trade_allowed(
-                            symbol, decision.action, account_info, open_positions,
-                            daily_pnl, weekly_pnl, peak_equity
-                        )
+                        decision.reasoning += f" | Spread too high: {current_spread_points:.1f} pts (typical: {typical_spread_points})"
+                        logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts")
 
-                        if risk_check["allowed"]:
-                            # Get ATR for Stop Loss calculation (fallback to 15 pips if ATR fails)
-                            atr_val = 0.0015
-                            if "ATR" in ta_raw_results and ta_raw_results["ATR"]:
-                                atr_val = ta_raw_results["ATR"][-1].value
-                            
-                            # Update cache with latest ATR for the Trailing Manager
-                            if symbol in self._candle_cache:
-                                self._candle_cache[symbol]["atr"] = atr_val
-
-                            # Calculate Size
-                            size_data = position_sizer.calculate(
-                                symbol, decision.action, current_price, account_info["equity"],
-                                atr_val, symbol_info, decision.confidence,
-                                cross_rates
+                    if spread_ok:
+                        # Check Economic Calendar
+                        calendar_check = await economic_calendar.is_safe_to_trade(symbol)
+                        if not calendar_check["safe"]:
+                            decision.action = "REJECT"
+                            decision.reasoning += f" | Calendar blocked: {calendar_check['reason']}"
+                            logger.warning(f"  ❌ Calendar blocked {symbol}: {calendar_check['reason']}")
+                        else:
+                            # Check Risk
+                            risk_check = risk_manager.check_trade_allowed(
+                                symbol, decision.action, account_info, open_positions,
+                                daily_pnl, weekly_pnl, peak_equity, current_price=current_price
                             )
 
-                            if size_data["allowed"]:
-                                # EXECUTE TRADE
-                                logger.critical(
-                                    f"🚀 EXECUTING {decision.action} onto {symbol} "
-                                    f"| Vol: {size_data['volume']}"
+                            if risk_check["allowed"]:
+                                # Get ATR for Stop Loss calculation (fallback to 15 pips if ATR fails)
+                                atr_val = 0.0015
+                                if "ATR" in ta_raw_results and ta_raw_results["ATR"]:
+                                    atr_val = ta_raw_results["ATR"][-1].value
+                                
+                                # Update cache with latest ATR for the Trailing Manager
+                                if symbol in self._candle_cache:
+                                    self._candle_cache[symbol]["atr"] = atr_val
+
+                                # Calculate Size
+                                size_data = position_sizer.calculate(
+                                    symbol, decision.action, current_price, account_info["equity"],
+                                    atr_val, symbol_info, decision.confidence,
+                                    cross_rates
                                 )
 
-                                order_res = await broker.place_order(
-                                    symbol, decision.action, size_data["volume"],
-                                    stop_loss=size_data["stop_loss"],
-                                    take_profit=size_data["take_profit"]
-                                )
+                                if size_data["allowed"]:
+                                    # Cooldown guard: prevent rapid-fire trades
+                                    now_ts = time.time()
+                                    time_since_last = now_ts - self._last_trade_time
+                                    if time_since_last < self._min_trade_gap_seconds:
+                                        wait_remaining = self._min_trade_gap_seconds - time_since_last
+                                        logger.warning(f"  Trade cooldown active for {symbol}: {wait_remaining:.0f}s remaining. Skipping.")
+                                        decision.action = "REJECT"
+                                        decision.reasoning += f" | Cooldown: {wait_remaining:.0f}s remaining"
+                                    else:
+                                        # EXECUTE TRADE
+                                        logger.critical(
+                                            f"🚀 EXECUTING {decision.action} onto {symbol} "
+                                            f"| Vol: {size_data['volume']}"
+                                        )
 
-                                if "success" in order_res and order_res["success"]:
-                                    trade_executed = True
-                                    
-                                    # Post-Execution Verification
-                                    await asyncio.sleep(1.0) # Wait for broker to settle position
-                                    new_positions = await broker.get_positions(use_cache=False)
-                                    pos_id = order_res.get("position_id")
-                                    actual_fill_price = current_price
-                                    
-                                    if pos_id:
-                                        matching_pos = next((p for p in new_positions if p.get("id") == pos_id), None)
-                                        if matching_pos:
-                                            actual_fill_price = matching_pos.get("openPrice", current_price)
-                                            # Calculate slippage in pips
-                                            is_jpy = "JPY" in symbol
-                                            pip_multiplier = 100 if is_jpy else 10000
-                                            slippage_pips = abs(actual_fill_price - current_price) * pip_multiplier
-                                            
-                                            if slippage_pips > settings.max_slippage_pips:
-                                                logger.critical(f"⚠️ HIGH SLIPPAGE DETECTED on {symbol}: Expected {current_price:.5f}, Filled {actual_fill_price:.5f} ({slippage_pips:.1f} pips)")
-                                                decision.reasoning += f" | Slippage Alert: {slippage_pips:.1f} pips"
-                                            
-                                            # Verify SL and TP were set
-                                            if not matching_pos.get("stopLoss") or not matching_pos.get("takeProfit"):
-                                                logger.critical(f"⚠️ MISSING SL/TP on {symbol} position {pos_id}")
+                                        order_res = await broker.place_order(
+                                            symbol, decision.action, size_data["volume"],
+                                            stop_loss=size_data["stop_loss"],
+                                            take_profit=size_data["take_profit"]
+                                        )
 
-                                    # Save to DB
-                                    db_trade = await crud.create_trade(
-                                        db,
-                                        external_id=order_res.get("position_id", ""),
-                                        symbol=symbol,
-                                        direction=decision.action,
-                                        volume=size_data["volume"],
-                                        open_price=actual_fill_price,
-                                        stop_loss=size_data["stop_loss"],
-                                        take_profit=size_data["take_profit"],
-                                        trading_mode=settings.trading_mode.value,
-                                        metadata_json={"risk_amount": size_data["risk_amount"]}
-                                    )
-                                    trade_id = db_trade.id
+                                        if "success" in order_res and order_res["success"]:
+                                            trade_executed = True
+                                            
+                                            # Post-Execution Verification
+                                            await asyncio.sleep(1.0) # Wait for broker to settle position
+                                            new_positions = await broker.get_positions(use_cache=False)
+                                            pos_id = order_res.get("position_id")
+                                            actual_fill_price = current_price
+                                            
+                                            if pos_id:
+                                                matching_pos = next((p for p in new_positions if p.get("id") == pos_id), None)
+                                                if matching_pos:
+                                                    actual_fill_price = matching_pos.get("openPrice", current_price)
+                                                    # Calculate slippage in pips
+                                                    is_jpy = "JPY" in symbol
+                                                    pip_multiplier = 100 if is_jpy else 10000
+                                                    slippage_pips = abs(actual_fill_price - current_price) * pip_multiplier
+                                                    
+                                                    if slippage_pips > settings.max_slippage_pips:
+                                                        logger.critical(f"⚠️ HIGH SLIPPAGE DETECTED on {symbol}: Expected {current_price:.5f}, Filled {actual_fill_price:.5f} ({slippage_pips:.1f} pips)")
+                                                        decision.reasoning += f" | Slippage Alert: {slippage_pips:.1f} pips"
+                                                    
+                                                    # Verify SL and TP were set
+                                                    if not matching_pos.get("stopLoss") or not matching_pos.get("takeProfit"):
+                                                        logger.critical(f"⚠️ MISSING SL/TP on {symbol} position {pos_id}")
+
+                                            # Save to DB
+                                            db_trade = await crud.create_trade(
+                                                db,
+                                                external_id=order_res.get("position_id", ""),
+                                                symbol=symbol,
+                                                direction=decision.action,
+                                                volume=size_data["volume"],
+                                                open_price=actual_fill_price,
+                                                stop_loss=size_data["stop_loss"],
+                                                take_profit=size_data["take_profit"],
+                                                trading_mode=settings.trading_mode.value,
+                                                metadata_json={"risk_amount": size_data["risk_amount"]}
+                                            )
+                                            trade_id = db_trade.id
+                                            # Update burst guard and cooldown
+                                            self._trades_this_cycle += 1
+                                            self._last_trade_time = time.time()
+                                            logger.info(f"  Burst guard: {self._trades_this_cycle}/{self._max_trades_per_cycle} trades this cycle.")
+                                        else:
+                                            decision.reasoning += f" | Order failed: {order_res.get('error')}"
                                 else:
-                                    decision.reasoning += f" | Order failed: {order_res.get('error')}"
+                                    decision.reasoning += f" | Sizing failed: {size_data.get('reason')}"
+                                    decision.action = "REJECT"
                             else:
-                                decision.reasoning += f" | Sizing failed: {size_data.get('reason')}"
                                 decision.action = "REJECT"
-                        else:
-                            decision.action = "REJECT"
-                            decision.reasoning += f" | Risk blocked: {risk_check['reason']}"
-                            logger.warning(f"  ❌ Risk blocked {symbol}: {risk_check['reason']}")
+                                decision.reasoning += f" | Risk blocked: {risk_check['reason']}"
+                                logger.warning(f"  ❌ Risk blocked {symbol}: {risk_check['reason']}")
 
             # 6. Save Decision Audit Trail
             await crud.create_decision(

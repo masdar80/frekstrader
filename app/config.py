@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     max_slippage_pips: float = 3.0
     max_risk_amount_usd: float = 10.0  # Phase 1.3: Hard cap on trade loss
     allow_multiple_per_pair: bool = True  # If True, can open 2+ positions on same pair
+    multi_pair_cooldown_hours: float = 4.0 # Time required between trades on same pair
+    multi_pair_min_distance_pips: float = 10.0 # Price distance required between trades on same pair
     max_trade_hours: float = 96.0          # Phase 3: Auto-close stale trades
     mock_balance_usd: float = 200.0        # Simulate a small account for testing
 
