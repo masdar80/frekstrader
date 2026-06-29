@@ -1,0 +1,23 @@
+store_demo
+$t0re_Dem0_!@#
+
+
+metatrade demo account
+Name: mas dar
+Server: MetaQuotes-Demo
+Type: Forex Hedged USD
+MT5_LOGIN=5052389806
+MT5_SERVER=MetaQuotes-Demo
+MT5_PASSWORD=Y@F0SpZp
+Investor: *8oHOHq*b
+
+https://newsapi.org/    API key is:
+c44c5ac82f3c446ca0848605ac981448
+-----------
+aistudio.google.com/apikey
+AIzaSyDenzfnVaQePXpmnkCIz29mzS7C-S1cF4Y
+
+metatrade5 login
+
+Login:	masdar80
+Password:	AhKyhxnX

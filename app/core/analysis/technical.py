@@ -25,6 +25,14 @@ class TechnicalAnalyzer:
 
     TIMEFRAMES = ["15m", "1h", "4h", "1d"]
     TIMEFRAME_WEIGHTS = {"15m": 0.15, "1h": 0.25, "4h": 0.30, "1d": 0.30}
+    
+    INDICATOR_GROUPS = {
+        "MOMENTUM": ["RSI", "STOCH"],       # Pick strongest only
+        "TREND": ["EMA_CROSS", "EMA200_TREND", "ADX"],  # Pick strongest only
+        "MEAN_REVERT": ["BBANDS"],           # Standalone
+        "TREND_FOLLOW": ["MACD"],            # Standalone
+        "VOLATILITY": ["ATR"],               # Info only, no vote
+    }
 
     def __init__(self):
         pass
@@ -479,38 +487,59 @@ class TechnicalAnalyzer:
 
     def get_confluence_score(self, results: Dict[str, List[IndicatorResult]]) -> Dict[str, Any]:
         """
-        Calculate confluence: how many indicators agree on direction.
+        Calculate confluence: how many indicator groups agree on direction.
         Returns overall direction, confidence, and breakdown.
         """
+        # Organize by timeframe first
+        tf_results = {}
+        for indicator_name, indicator_results in results.items():
+            for result in indicator_results:
+                if result.timeframe not in tf_results:
+                    tf_results[result.timeframe] = {}
+                tf_results[result.timeframe][indicator_name] = result
+
         buy_votes = 0
         sell_votes = 0
         total_weight = 0
         buy_strength = 0.0
         sell_strength = 0.0
         breakdown = []
-
-        for indicator_name, indicator_results in results.items():
-            for result in indicator_results:
-                if result.signal == "NEUTRAL":
+        
+        for tf, inds in tf_results.items():
+            tf_weight = self.TIMEFRAME_WEIGHTS.get(tf, 0.2)
+            
+            for group, members in self.INDICATOR_GROUPS.items():
+                if group == "VOLATILITY":
                     continue
-
-                tf_weight = self.TIMEFRAME_WEIGHTS.get(result.timeframe, 0.2)
-
-                if result.signal == "BUY":
-                    buy_votes += 1
-                    buy_strength += result.strength * tf_weight
-                elif result.signal == "SELL":
-                    sell_votes += 1
-                    sell_strength += result.strength * tf_weight
-
-                total_weight += tf_weight
-                breakdown.append({
-                    "indicator": result.name,
-                    "timeframe": result.timeframe,
-                    "signal": result.signal,
-                    "strength": result.strength,
-                    "value": result.value,
-                })
+                
+                # Find the strongest signal in this group for this timeframe
+                best_result = None
+                best_strength = -1.0
+                
+                for member in members:
+                    if member in inds:
+                        res = inds[member]
+                        if res.signal != "NEUTRAL" and res.strength > best_strength:
+                            best_result = res
+                            best_strength = res.strength
+                
+                if best_result:
+                    if best_result.signal == "BUY":
+                        buy_votes += 1
+                        buy_strength += best_result.strength * tf_weight
+                    elif best_result.signal == "SELL":
+                        sell_votes += 1
+                        sell_strength += best_result.strength * tf_weight
+                    
+                    total_weight += tf_weight
+                    breakdown.append({
+                        "indicator": best_result.name,
+                        "group": group,
+                        "timeframe": best_result.timeframe,
+                        "signal": best_result.signal,
+                        "strength": best_result.strength,
+                        "value": best_result.value,
+                    })
 
         # Normalize
         if total_weight > 0:

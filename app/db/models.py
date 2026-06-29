@@ -107,6 +107,34 @@ class NewsEvent(Base):
     analysis = Column(Text, nullable=True)
 
 
+class FeatureSnapshot(Base):
+    """Raw indicator values at the moment of each decision — ML training data."""
+    __tablename__ = "feature_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=utcnow, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    decision_id = Column(Integer, nullable=True)
+
+    # Raw indicators per timeframe (JSON blob)
+    indicators_json = Column(JSON, nullable=False)
+
+    # Context features
+    hour_of_day = Column(Integer)
+    day_of_week = Column(Integer)
+    spread_pips = Column(Float)
+    atr_1h = Column(Float, nullable=True)
+    atr_4h = Column(Float, nullable=True)
+
+    # Regime features (added in Phase 1)
+    market_regime = Column(String(20), nullable=True)
+
+    # Outcome (filled when trade closes)
+    trade_id = Column(Integer, nullable=True)
+    outcome = Column(String(10), nullable=True)  # WIN, LOSS, REJECT
+    profit_pips = Column(Float, nullable=True)
+
+
 class TradingHours(Base):
     """Trading hours configuration for the bot."""
     __tablename__ = "trading_hours"

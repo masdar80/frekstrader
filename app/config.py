@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     trading_pairs: str = "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCHF"
     trading_mode: TradingMode = TradingMode.AGGRESSIVE
     use_ai_sentiment: bool = True
+    paper_trading_mode: bool = False  # If True, analyzes and logs decisions but skips broker execution
 
     # === Risk Management ===
     max_risk_per_trade_pct: float = 2.5

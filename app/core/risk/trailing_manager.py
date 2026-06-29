@@ -70,8 +70,16 @@ class TrailingStopManager:
             
             # 3. Trailing Logic (only after breakeven for safety)
             if at_breakeven:
-                # Target SL = current_price - 1.5x ATR (for BUY)
-                trail_dist = atr_val * settings.trailing_atr_mult
+                # Dynamic Parabolic Trailing: As profit grows, tighten the stop multiplier
+                profit_in_atr = profit_dist / atr_val if atr_val > 0 else 0
+                current_mult = settings.trailing_atr_mult
+                
+                if profit_in_atr > 3.0:
+                    current_mult = max(0.5, current_mult - 1.0)
+                elif profit_in_atr > 2.0:
+                    current_mult = max(1.0, current_mult - 0.5)
+                    
+                trail_dist = atr_val * current_mult
                 target_sl = (current_price - trail_dist) if is_buy else (current_price + trail_dist)
                 
                 # Only move SL if it improves protection (tightens)

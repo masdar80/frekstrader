@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Trade, Decision, Signal, AccountSnapshot, NewsEvent, TradingHours
+from app.db.models import Trade, Decision, Signal, AccountSnapshot, NewsEvent, TradingHours, FeatureSnapshot
 from app.utils.helpers import utcnow
 
 
@@ -100,6 +100,23 @@ async def get_latest_signals(db: AsyncSession, symbol: str, limit: int = 20) -> 
         select(Signal).where(Signal.symbol == symbol).order_by(desc(Signal.timestamp)).limit(limit)
     )
     return result.scalars().all()
+
+
+# === Feature Snapshots ===
+
+async def create_feature_snapshot(db: AsyncSession, **kwargs) -> FeatureSnapshot:
+    snapshot = FeatureSnapshot(**kwargs)
+    db.add(snapshot)
+    await db.flush()
+    return snapshot
+
+async def backfill_snapshot_outcome(db: AsyncSession, trade_id: int, outcome: str, profit_pips: float):
+    """Backfill outcome on feature snapshots linked to a trade."""
+    result = await db.execute(select(FeatureSnapshot).where(FeatureSnapshot.trade_id == trade_id))
+    snapshots = result.scalars().all()
+    for snap in snapshots:
+        snap.outcome = outcome
+        snap.profit_pips = profit_pips
 
 
 # === Account Snapshots ===
@@ -283,6 +300,7 @@ async def get_performance_metrics(db: AsyncSession) -> Dict[str, Any]:
 async def purge_all_trading_data(db: AsyncSession):
     """Purge all trading-related data for a fresh start."""
     from sqlalchemy import delete
+    await db.execute(delete(FeatureSnapshot))
     await db.execute(delete(Signal))
     await db.execute(delete(Decision))
     await db.execute(delete(AccountSnapshot))

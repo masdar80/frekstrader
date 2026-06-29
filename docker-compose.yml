@@ -1,7 +1,7 @@
 services:
   web:
     build: .
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     restart: always
     volumes:
       - .:/app
@@ -9,32 +9,3 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
-  db:
-    image: postgres:15-alpine
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
-    environment:
-      - POSTGRES_USER=foreks
-      - POSTGRES_PASSWORD=foreks_secret
-      - POSTGRES_DB=foreksdb
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U foreks"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-volumes:
-  postgres_data:

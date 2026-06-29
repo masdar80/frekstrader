@@ -20,6 +20,7 @@ from app.core.analysis.technical import technical_analyzer
 from app.core.analysis.sentiment import sentiment_engine
 from app.core.analysis.signals import normalize_technical_signals, normalize_sentiment_signals
 from app.core.analysis.calendar import economic_calendar
+from app.core.analysis.regime import regime_detector
 from app.core.brain.decision_engine import decision_engine
 from app.core.risk.manager import risk_manager
 from app.core.risk.position_sizer import position_sizer
@@ -39,8 +40,8 @@ class MarketWatcher:
     def __init__(self):
         self.is_running = False
         self.is_paused = False
-        self.sleep_interval = 60          # Run every 60 seconds (prevents 429)
-        self.sentiment_interval = 900     # Refresh sentiment every 15 minutes
+        self.sleep_interval = 90          # Run every 90 seconds (reduced broker API pressure)
+        self.sentiment_interval = 21600   # Refresh sentiment every 6 hours (matches cache TTL)
         self._last_sentiment_run = 0.0
         self._sentiment_cache: Dict[str, Dict[str, Any]] = {}
         self._candle_cache: Dict[str, Dict[str, Any]] = {}
@@ -201,8 +202,11 @@ class MarketWatcher:
             await self._check_trade_timeouts(open_positions)
 
     async def _refresh_all_sentiment(self):
-        """Fetch fresh sentiment for all currencies (runs every 15 min)."""
+        """Fetch fresh sentiment for all pairs (runs every 6 hours).
+        Completely skipped when use_ai_sentiment is False.
+        """
         if not settings.use_ai_sentiment:
+            logger.info("📵 Sentiment refresh skipped (USE_AI_SENTIMENT=false)")
             return
             
         for symbol in settings.pairs_list:
@@ -265,6 +269,9 @@ class MarketWatcher:
         ta_raw_results = technical_analyzer.analyze(candles_by_tf)
         ta_confluence = technical_analyzer.get_confluence_score(ta_raw_results)
 
+        # 3. Regime Detection
+        regime_info = regime_detector.detect(symbol, ta_raw_results)
+
         # 4. Sentiment — use cached results (refreshed on separate timer)
         sentiment_result = self._sentiment_cache.get(symbol, {
             "symbol": symbol, "signal": "NEUTRAL", "score": 0.0,
@@ -297,7 +304,7 @@ class MarketWatcher:
                 )
 
             # 4. Skeptical Brain Engine
-            decision = decision_engine.evaluate_signals(symbol, signals)
+            decision = decision_engine.evaluate_signals(symbol, signals, regime_info)
 
             # 5. Risk Management & Execution
             trade_executed = False
@@ -359,64 +366,68 @@ class MarketWatcher:
                                         decision.action = "REJECT"
                                         decision.reasoning += f" | Cooldown: {wait_remaining:.0f}s remaining"
                                     else:
-                                        # EXECUTE TRADE
-                                        logger.critical(
-                                            f"🚀 EXECUTING {decision.action} onto {symbol} "
-                                            f"| Vol: {size_data['volume']}"
-                                        )
-
-                                        order_res = await broker.place_order(
-                                            symbol, decision.action, size_data["volume"],
-                                            stop_loss=size_data["stop_loss"],
-                                            take_profit=size_data["take_profit"]
-                                        )
-
-                                        if "success" in order_res and order_res["success"]:
-                                            trade_executed = True
-                                            
-                                            # Post-Execution Verification
-                                            await asyncio.sleep(1.0) # Wait for broker to settle position
-                                            new_positions = await broker.get_positions(use_cache=False)
-                                            pos_id = order_res.get("position_id")
-                                            actual_fill_price = current_price
-                                            
-                                            if pos_id:
-                                                matching_pos = next((p for p in new_positions if p.get("id") == pos_id), None)
-                                                if matching_pos:
-                                                    actual_fill_price = matching_pos.get("openPrice", current_price)
-                                                    # Calculate slippage in pips
-                                                    is_jpy = "JPY" in symbol
-                                                    pip_multiplier = 100 if is_jpy else 10000
-                                                    slippage_pips = abs(actual_fill_price - current_price) * pip_multiplier
-                                                    
-                                                    if slippage_pips > settings.max_slippage_pips:
-                                                        logger.critical(f"⚠️ HIGH SLIPPAGE DETECTED on {symbol}: Expected {current_price:.5f}, Filled {actual_fill_price:.5f} ({slippage_pips:.1f} pips)")
-                                                        decision.reasoning += f" | Slippage Alert: {slippage_pips:.1f} pips"
-                                                    
-                                                    # Verify SL and TP were set
-                                                    if not matching_pos.get("stopLoss") or not matching_pos.get("takeProfit"):
-                                                        logger.critical(f"⚠️ MISSING SL/TP on {symbol} position {pos_id}")
-
-                                            # Save to DB
-                                            db_trade = await crud.create_trade(
-                                                db,
-                                                external_id=order_res.get("position_id", ""),
-                                                symbol=symbol,
-                                                direction=decision.action,
-                                                volume=size_data["volume"],
-                                                open_price=actual_fill_price,
-                                                stop_loss=size_data["stop_loss"],
-                                                take_profit=size_data["take_profit"],
-                                                trading_mode=settings.trading_mode.value,
-                                                metadata_json={"risk_amount": size_data["risk_amount"]}
-                                            )
-                                            trade_id = db_trade.id
-                                            # Update burst guard and cooldown
-                                            self._trades_this_cycle += 1
-                                            self._last_trade_time = time.time()
-                                            logger.info(f"  Burst guard: {self._trades_this_cycle}/{self._max_trades_per_cycle} trades this cycle.")
+                                        if settings.paper_trading_mode:
+                                            logger.critical(f"📄 PAPER TRADE {decision.action} on {symbol} (Vol: {size_data['volume']}). Broker execution skipped.")
+                                            decision.reasoning += " | Paper trade (no execution)"
                                         else:
-                                            decision.reasoning += f" | Order failed: {order_res.get('error')}"
+                                            # EXECUTE TRADE
+                                            logger.critical(
+                                                f"🚀 EXECUTING {decision.action} onto {symbol} "
+                                                f"| Vol: {size_data['volume']}"
+                                            )
+    
+                                            order_res = await broker.place_order(
+                                                symbol, decision.action, size_data["volume"],
+                                                stop_loss=size_data["stop_loss"],
+                                                take_profit=size_data["take_profit"]
+                                            )
+    
+                                            if "success" in order_res and order_res["success"]:
+                                                trade_executed = True
+                                                
+                                                # Post-Execution Verification
+                                                await asyncio.sleep(1.0) # Wait for broker to settle position
+                                                new_positions = await broker.get_positions(use_cache=False)
+                                                pos_id = order_res.get("position_id")
+                                                actual_fill_price = current_price
+                                                
+                                                if pos_id:
+                                                    matching_pos = next((p for p in new_positions if p.get("id") == pos_id), None)
+                                                    if matching_pos:
+                                                        actual_fill_price = matching_pos.get("openPrice", current_price)
+                                                        # Calculate slippage in pips
+                                                        is_jpy = "JPY" in symbol
+                                                        pip_multiplier = 100 if is_jpy else 10000
+                                                        slippage_pips = abs(actual_fill_price - current_price) * pip_multiplier
+                                                        
+                                                        if slippage_pips > settings.max_slippage_pips:
+                                                            logger.critical(f"⚠️ HIGH SLIPPAGE DETECTED on {symbol}: Expected {current_price:.5f}, Filled {actual_fill_price:.5f} ({slippage_pips:.1f} pips)")
+                                                            decision.reasoning += f" | Slippage Alert: {slippage_pips:.1f} pips"
+                                                        
+                                                        # Verify SL and TP were set
+                                                        if not matching_pos.get("stopLoss") or not matching_pos.get("takeProfit"):
+                                                            logger.critical(f"⚠️ MISSING SL/TP on {symbol} position {pos_id}")
+    
+                                                # Save to DB
+                                                db_trade = await crud.create_trade(
+                                                    db,
+                                                    external_id=order_res.get("position_id", ""),
+                                                    symbol=symbol,
+                                                    direction=decision.action,
+                                                    volume=size_data["volume"],
+                                                    open_price=actual_fill_price,
+                                                    stop_loss=size_data["stop_loss"],
+                                                    take_profit=size_data["take_profit"],
+                                                    trading_mode=settings.trading_mode.value,
+                                                    metadata_json={"risk_amount": size_data["risk_amount"]}
+                                                )
+                                                trade_id = db_trade.id
+                                                # Update burst guard and cooldown
+                                                self._trades_this_cycle += 1
+                                                self._last_trade_time = time.time()
+                                                logger.info(f"  Burst guard: {self._trades_this_cycle}/{self._max_trades_per_cycle} trades this cycle.")
+                                            else:
+                                                decision.reasoning += f" | Order failed: {order_res.get('error')}"
                                 else:
                                     decision.reasoning += f" | Sizing failed: {size_data.get('reason')}"
                                     decision.action = "REJECT"
@@ -426,7 +437,7 @@ class MarketWatcher:
                                 logger.warning(f"  ❌ Risk blocked {symbol}: {risk_check['reason']}")
 
             # 6. Save Decision Audit Trail
-            await crud.create_decision(
+            db_dec = await crud.create_decision(
                 db,
                 symbol=symbol,
                 action=decision.action,
@@ -436,6 +447,40 @@ class MarketWatcher:
                 reasoning=decision.reasoning,
                 trade_id=trade_id,
                 signals_json=[s.model_dump() for s in signals]
+            )
+            
+            # 6.1 Save Feature Snapshot for ML training
+            indicators_json = {}
+            for ind_name, results_list in ta_raw_results.items():
+                for r in results_list:
+                    if r.timeframe not in indicators_json:
+                        indicators_json[r.timeframe] = {}
+                    indicators_json[r.timeframe][ind_name] = r.value
+            
+            now_dt = datetime.now()
+            point_value = symbol_info.get("point", 0.00001)
+            is_jpy = "JPY" in symbol
+            pip_multiplier = 100 if is_jpy else 10000
+            
+            atr_1h = None
+            atr_4h = None
+            if "ATR" in ta_raw_results:
+                for r in ta_raw_results["ATR"]:
+                    if r.timeframe == "1h": atr_1h = r.value
+                    elif r.timeframe == "4h": atr_4h = r.value
+                    
+            await crud.create_feature_snapshot(
+                db,
+                symbol=symbol,
+                decision_id=db_dec.id,
+                indicators_json=indicators_json,
+                hour_of_day=now_dt.hour,
+                day_of_week=now_dt.weekday(),
+                spread_pips=current_spread * pip_multiplier,
+                atr_1h=atr_1h,
+                atr_4h=atr_4h,
+                trade_id=trade_id,
+                market_regime=regime_info["regime"]
             )
 
             # 7. Commit immediately for real-time visibility
@@ -532,6 +577,14 @@ class MarketWatcher:
                         
                         await crud.close_trade(db, trade.id, close_price, profit, close_reason=reason)
                         await crud.update_decision_outcome(db, trade.id, profit > 0)
+                        
+                        # Backfill feature snapshot outcome
+                        outcome = "WIN" if profit > 0 else "LOSS"
+                        is_jpy = "JPY" in trade.symbol
+                        pip_multiplier = 100 if is_jpy else 10000
+                        direction_multiplier = 1 if trade.direction.upper() == "BUY" else -1
+                        profit_pips = (close_price - trade.open_price) * pip_multiplier * direction_multiplier
+                        await crud.backfill_snapshot_outcome(db, trade.id, outcome, profit_pips)
                     else:
                         # Phase 1.5: Retry logic for missing history deals
                         retry_count = trade.metadata_json.get("reconcile_retries", 0) if trade.metadata_json else 0
@@ -584,9 +637,10 @@ class MarketWatcher:
 
             try:
                 # MetaAPI returns ISO 8601: "2024-03-24T18:00:00.000Z"
+                from datetime import timezone
                 open_time = datetime.fromisoformat(open_time_str.replace("Z", "+00:00"))
-                now = utcnow()
-                duration = now - open_time
+                now_utc = datetime.now(timezone.utc)
+                duration = now_utc - open_time
                 duration_hours = duration.total_seconds() / 3600
 
                 if duration_hours >= max_hours:

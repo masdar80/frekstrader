@@ -48,8 +48,8 @@ class PositionSizer:
         # Using 2.0x ATR for Stop Loss to avoid noise triggering
         sl_distance = atr_value * 2.0
         
-        # Take Profit is typically 2x the risk distance (1:2 R:R ratio)
-        tp_distance = sl_distance * 2.0
+        # Take Profit is typically 3x the risk distance (1:3 R:R ratio based on backtest)
+        tp_distance = sl_distance * 3.0
         
         # 2. Derive Lot Size
         # Value of 1 pip for standard lot

@@ -446,17 +446,11 @@ class MetaAPIClient:
             return []
         
         start = datetime.now(timezone.utc) - timedelta(days=days)
-        start_str = start.strftime("%Y-%m-%dT%H:%M:%SZ")
-        end_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        start_str = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        end_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         
         data = await self._get(
-            "/history-deals",
-            params={
-                "startTime": start_str,
-                "endTime": end_str,
-                "from": start_str,
-                "to": end_str
-            }
+            f"/history-deals/time/{start_str}/{end_str}"
         )
         
         if data and isinstance(data, list):
@@ -466,7 +460,7 @@ class MetaAPIClient:
                     "position_id": d.get("positionId", ""),
                     "symbol": d.get("symbol", ""),
                     "type": d.get("type", ""),
-                    "entry_type": d.get("entry", ""), 
+                    "entry_type": d.get("entryType", d.get("entry", "")), 
                     "volume": d.get("volume", 0),
                     "price": d.get("price", 0),
                     "profit": d.get("profit", 0),
@@ -491,7 +485,7 @@ class MetaAPIClient:
                     "position_id": d.get("positionId", ""),
                     "symbol": d.get("symbol", ""),
                     "type": d.get("type", ""),
-                    "entry_type": d.get("entry", ""), 
+                    "entry_type": d.get("entryType", d.get("entry", "")), 
                     "volume": d.get("volume", 0),
                     "price": d.get("price", 0),
                     "profit": d.get("profit", 0),

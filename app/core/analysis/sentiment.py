@@ -1,19 +1,26 @@
 """
 News Sentiment Engine using NewsAPI and Gemini/Vader.
 
-v2 — Improvements:
-  - Gemini returns structured JSON scores (used as primary scorer)
-  - VADER is the fallback when Gemini is unavailable
-  - Built-in TTL cache to avoid redundant API calls
+v3 — Rate Limit Fix:
+  - Cache TTL raised to 6 hours (was 15 min — caused 429 on free plan)
+  - NewsAPI calls gated behind use_ai_sentiment flag
+  - Per-currency daily call budget (max 8 NewsAPI calls/currency/day)
+  - Gemini can score without NewsAPI using its own knowledge
+  - Graceful degradation: VADER → Gemini-only → NEUTRAL
 """
 import json
 import asyncio
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-import google.generativeai as genai
+try:
+    from google import genai as genai_new
+    _USE_NEW_GENAI = True
+except ImportError:
+    import google.generativeai as genai  # type: ignore[import]  # legacy fallback
+    _USE_NEW_GENAI = False
 import httpx
 
 from app.config import settings
@@ -22,7 +29,11 @@ from app.utils.logger import logger
 
 # In-memory TTL cache for sentiment results
 _sentiment_cache: Dict[str, Dict[str, Any]] = {}
-_cache_ttl = 900  # 15 minutes
+_cache_ttl = 21600  # 6 hours — avoids burning the free NewsAPI 100 req/day limit
+
+# Per-currency daily NewsAPI request budget
+_newsapi_call_log: Dict[str, List[float]] = {}  # currency -> list of call timestamps
+_NEWSAPI_DAILY_BUDGET_PER_CURRENCY = 8  # Max 8 calls/currency/day = 40 total/day for 5 pairs
 
 
 class SentimentEngine:
@@ -34,12 +45,17 @@ class SentimentEngine:
 
         # Configure Gemini if available
         self.gemini_available = False
+        self.gemini_model = None
+        self._genai_client = None
         if settings.gemini_api_key:
             try:
-                genai.configure(api_key=settings.gemini_api_key)
-                self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+                if _USE_NEW_GENAI:
+                    self._genai_client = genai_new.Client(api_key=settings.gemini_api_key)
+                else:
+                    genai.configure(api_key=settings.gemini_api_key)  # type: ignore
+                    self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')  # type: ignore
                 self.gemini_available = True
-                logger.info("✅ Gemini AI configured for advanced sentiment analysis")
+                logger.info("Gemini AI configured for advanced sentiment analysis")
             except Exception as e:
                 logger.warning(f"Failed to configure Gemini: {e}")
 
@@ -55,12 +71,18 @@ class SentimentEngine:
 
     async def get_sentiment(self, symbol: str) -> Dict[str, Any]:
         """Get overall sentiment for a trading pair (e.g., EURUSD).
-        Uses cache to avoid redundant API calls within 15 minutes.
+        Uses a 6-hour cache to protect the free NewsAPI 100 req/day limit.
+        When use_ai_sentiment is disabled, returns NEUTRAL immediately.
         """
+        # Fast-exit: sentiment disabled — return NEUTRAL without any API calls
+        if not settings.use_ai_sentiment:
+            return self._neutral_result(symbol, "Sentiment disabled in config")
+
         # Check cache
         cache_key = symbol
         cached = _sentiment_cache.get(cache_key)
         if cached and (time.time() - cached.get("_cached_at", 0)) < _cache_ttl:
+            logger.info(f"📰 Sentiment for {symbol}: using {_cache_ttl//3600}h cached result")
             return cached
 
         base_ccy = symbol[:3]
@@ -102,6 +124,20 @@ class SentimentEngine:
         # Store in cache
         _sentiment_cache[cache_key] = result
         return result
+
+    def _neutral_result(self, symbol: str, reason: str) -> Dict[str, Any]:
+        """Return a zero-impact NEUTRAL sentiment result."""
+        return {
+            "symbol": symbol,
+            "signal": "NEUTRAL",
+            "score": 0.0,
+            "strength": 0.0,
+            "base": {"score": 0.0, "news_count": 0},
+            "quote": {"score": 0.0, "news_count": 0},
+            "confidence": 0.0,
+            "_cached_at": time.time(),
+            "_reason": reason,
+        }
 
     async def _analyze_currency_news(self, currency: str) -> Dict[str, Any]:
         """Fetch and analyze news for a specific currency."""
@@ -179,6 +215,7 @@ class SentimentEngine:
     ) -> tuple:
         """Ask Gemini to return a structured sentiment score.
         Returns (score, reasoning) or (None, None) on failure.
+        Supports both the new google.genai SDK and the legacy google.generativeai SDK.
         """
         try:
             headlines = "\n".join([f"- {a['title']}" for a in articles[:12]])
@@ -195,12 +232,23 @@ class SentimentEngine:
                 f"+1.0 = very bullish for {currency}, 0.0 = neutral."
             )
 
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.gemini_model.generate_content, prompt),
-                timeout=10.0  # 10 second timeout
-            )
+            if _USE_NEW_GENAI and self._genai_client:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._genai_client.models.generate_content,
+                        model='gemini-2.0-flash',
+                        contents=prompt
+                    ),
+                    timeout=10.0
+                )
+                text = response.text.strip()
+            else:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(self.gemini_model.generate_content, prompt),
+                    timeout=10.0
+                )
+                text = response.text.strip()
 
-            text = response.text.strip()
             # Strip markdown code fences if present
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -209,7 +257,7 @@ class SentimentEngine:
             score = max(-1.0, min(1.0, float(data.get("score", 0.0))))
             reasoning = data.get("reasoning", "AI analysis")
 
-            logger.info(f"🤖 Gemini {currency}: score={score:+.2f} — {reasoning}")
+            logger.info(f"Gemini {currency}: score={score:+.2f} -- {reasoning}")
             return score, reasoning
 
         except asyncio.TimeoutError:
@@ -222,9 +270,28 @@ class SentimentEngine:
             logger.warning(f"Gemini failed for {currency}: {e}")
             return None, None
 
+    def _newsapi_budget_ok(self, currency: str) -> bool:
+        """Check if we still have NewsAPI budget for this currency today."""
+        now = time.time()
+        day_ago = now - 86400  # 24 hours
+        calls = _newsapi_call_log.get(currency, [])
+        # Prune calls older than 24h
+        calls = [t for t in calls if t > day_ago]
+        _newsapi_call_log[currency] = calls
+        remaining = _NEWSAPI_DAILY_BUDGET_PER_CURRENCY - len(calls)
+        if remaining <= 0:
+            logger.warning(f"📵 NewsAPI daily budget exhausted for {currency} ({len(calls)} calls today). Skipping.")
+            return False
+        logger.debug(f"NewsAPI budget for {currency}: {remaining} calls remaining today")
+        return True
+
     async def _fetch_newsapi(self, currency: str) -> List[Dict[str, Any]]:
-        """Fetch latest forex news from NewsAPI."""
+        """Fetch latest forex news from NewsAPI with daily budget protection."""
         if not self.newsapi_key:
+            return []
+
+        # Guard: skip if daily budget for this currency is exhausted
+        if not self._newsapi_budget_ok(currency):
             return []
 
         keywords = self.currency_keywords.get(currency, [currency])
@@ -246,7 +313,15 @@ class SentimentEngine:
 
                 if response.status_code == 200:
                     data = response.json()
-                    return data.get("articles", [])[:15]
+                    articles = data.get("articles", [])[:15]
+                    # Only count against budget on success
+                    _newsapi_call_log.setdefault(currency, []).append(time.time())
+                    return articles
+                elif response.status_code == 429:
+                    logger.warning(f"NewsAPI rate-limited for {currency}. Marking budget exhausted.")
+                    # Mark budget as fully used to prevent further attempts today
+                    _newsapi_call_log[currency] = [time.time()] * _NEWSAPI_DAILY_BUDGET_PER_CURRENCY
+                    return []
                 elif response.status_code == 426:
                     logger.warning("NewsAPI upgrade required (free plan restriction).")
                     return []
