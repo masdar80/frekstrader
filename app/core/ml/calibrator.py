@@ -47,10 +47,23 @@ class MLConfidenceCalibrator:
             # Flatten indicators to match training features
             row = {}
             if raw_indicators:
-                for tf, inds in raw_indicators.items():
-                    for ind, val in inds.items():
-                        col_name = f"{ind}_{tf}"
-                        row[col_name] = val
+                for key, val in raw_indicators.items():
+                    if isinstance(val, list):
+                        # Format: {indicator_name: [IndicatorResult/dict, ...]}
+                        for res in val:
+                            # Handle both object attributes and dict keys
+                            name = getattr(res, "name", None) or (res.get("name") if isinstance(res, dict) else None) or key
+                            tf = getattr(res, "timeframe", None) or (res.get("timeframe") if isinstance(res, dict) else None)
+                            value = getattr(res, "value", None) or (res.get("value") if isinstance(res, dict) else None)
+                            if tf is not None and value is not None:
+                                row[f"{name}_{tf}"] = value
+                    elif isinstance(val, dict):
+                        # Format: {timeframe: {indicator_name: value}} or {indicator_name: {timeframe: value}}
+                        for sub_key, sub_val in val.items():
+                            if key in ["15m", "1h", "4h", "1d"]:
+                                row[f"{sub_key}_{key}"] = sub_val
+                            elif sub_key in ["15m", "1h", "4h", "1d"]:
+                                row[f"{key}_{sub_key}"] = sub_val
             
             # Create DataFrame with exactly the right columns, filling missing with 0
             df = pd.DataFrame([row])

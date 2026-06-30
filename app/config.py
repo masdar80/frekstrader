@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     drawdown_circuit_breaker_pct: float = 30.0
     max_slippage_pips: float = 3.0
     max_risk_amount_usd: float = 10.0  # Phase 1.3: Hard cap on trade loss
+    risk_atr_mult_sl: float = 2.0      # SL distance = ATR × this
+    risk_atr_mult_tp: float = 3.0      # TP distance = ATR × this
     allow_multiple_per_pair: bool = True  # If True, can open 2+ positions on same pair
     multi_pair_cooldown_hours: float = 4.0 # Time required between trades on same pair
     multi_pair_min_distance_pips: float = 10.0 # Price distance required between trades on same pair

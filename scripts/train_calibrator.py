@@ -14,7 +14,7 @@ from app.utils.logger import logger
 async def train():
     print("--- ML Calibrator Training ---")
     async with async_session() as db:
-        result = await db.execute(select(FeatureSnapshot).where(FeatureSnapshot.outcome != None))
+        result = await db.execute(select(FeatureSnapshot).where(FeatureSnapshot.outcome.in_(["WIN", "LOSS"])))
         snapshots = result.scalars().all()
         
         if len(snapshots) < 50:

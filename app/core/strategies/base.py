@@ -22,12 +22,12 @@ class TrendFollowingStrategy(BaseStrategy):
     def evaluate(self, symbol: str, ta_results: Dict[str, Any], regime_info: Dict[str, Any]) -> StandardSignal:
         regime = regime_info.get("regime", "UNKNOWN")
         if regime not in ["TRENDING_UP", "TRENDING_DOWN"]:
-            return StandardSignal(self.name, "NEUTRAL", 0.0, "multi", {"reason": "Not trending"})
+            return StandardSignal(symbol=symbol, direction="NEUTRAL", strength=0.0, source=self.name, confidence=0.0, reasoning="Not trending")
             
         direction = "BUY" if regime == "TRENDING_UP" else "SELL"
         confidence = regime_info.get("confidence", 0.5)
         
-        return StandardSignal(self.name, direction, confidence, "multi", {"reason": f"Trend is {direction}"})
+        return StandardSignal(symbol=symbol, direction=direction, strength=confidence, source=self.name, confidence=confidence, reasoning=f"Trend is {direction}")
 
 class MeanReversionStrategy(BaseStrategy):
     def __init__(self):
@@ -36,7 +36,7 @@ class MeanReversionStrategy(BaseStrategy):
     def evaluate(self, symbol: str, ta_results: Dict[str, Any], regime_info: Dict[str, Any]) -> StandardSignal:
         regime = regime_info.get("regime", "UNKNOWN")
         if regime != "RANGING":
-            return StandardSignal(self.name, "NEUTRAL", 0.0, "multi", {"reason": "Not ranging"})
+            return StandardSignal(symbol=symbol, direction="NEUTRAL", strength=0.0, source=self.name, confidence=0.0, reasoning="Not ranging")
             
         # Check RSI for overbought/oversold
         rsi_1h = 50
@@ -58,7 +58,7 @@ class MeanReversionStrategy(BaseStrategy):
             direction = "BUY"
             confidence = min(1.0, (25 - rsi_1h) / 25)
             
-        return StandardSignal(self.name, direction, confidence, "multi", {"reason": f"RSI is {rsi_1h}"})
+        return StandardSignal(symbol=symbol, direction=direction, strength=confidence, source=self.name, confidence=confidence, reasoning=f"RSI is {rsi_1h}")
 
 class BreakoutStrategy(BaseStrategy):
     def __init__(self):
@@ -66,4 +66,4 @@ class BreakoutStrategy(BaseStrategy):
         
     def evaluate(self, symbol: str, ta_results: Dict[str, Any], regime_info: Dict[str, Any]) -> StandardSignal:
         # Placeholder for breakout logic using Bollinger Bands
-        return StandardSignal(self.name, "NEUTRAL", 0.0, "multi", {"reason": "WIP"})
+        return StandardSignal(symbol=symbol, direction="NEUTRAL", strength=0.0, source=self.name, confidence=0.0, reasoning="WIP")

@@ -21,6 +21,8 @@ class HistoricalDataIngestor:
             logger.info(f"Ingesting CSV: {csv_path} for {symbol} ({timeframe})")
             
             df = pd.read_csv(csv_path)
+            if len(df.columns) <= 1:
+                df = pd.read_csv(csv_path, sep="\t")
             
             # Standardize column names
             col_map = {}

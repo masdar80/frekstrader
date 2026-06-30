@@ -153,18 +153,20 @@ class Backtester:
             self._update_trailing_stops(close)
             
             # 3. Decision making (only if no open trades, to simplify)
-            if len(self.open_trades) < settings.max_open_trades:
+            if len(self.open_trades) < settings.max_open_positions:
                 ta_raw_results = technical_analyzer.analyze_row(self.df_by_tf, current_time)
                 ta_confluence = technical_analyzer.get_confluence_score(ta_raw_results)
                 
                 regime_info = regime_detector.detect(self.symbol, ta_raw_results)
                 
                 tech_sig = StandardSignal(
+                    symbol=self.symbol,
                     source="TECH_CONFLUENCE",
-                    direction=ta_confluence["signal"],
-                    confidence=ta_confluence["score"],
-                    timeframe="multi",
-                    details=ta_confluence["details"]
+                    direction=ta_confluence["direction"],
+                    strength=ta_confluence["confidence"],
+                    confidence=ta_confluence["confidence"],
+                    reasoning=f"Confluence: buy_votes={ta_confluence['buy_votes']}, sell_votes={ta_confluence['sell_votes']}",
+                    metadata={"breakdown": ta_confluence["breakdown"]}
                 )
                 
                 decision = decision_engine.evaluate_signals(self.symbol, [tech_sig], regime_info)
