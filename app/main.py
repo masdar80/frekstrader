@@ -68,6 +68,23 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # 3.5. Seed Default Trading Hours if empty
+    from app.db.database import async_session
+    from app.db.crud import get_trading_hours, update_trading_hours
+    try:
+        async with async_session() as db:
+            existing_hours = await get_trading_hours(db)
+            if not existing_hours:
+                logger.info("🌱 Seeding default trading hours (Mon-Fri active, Sat-Sun inactive)...")
+                default_hours = [
+                    {"day_of_week": i, "open_time": "00:00", "close_time": "23:59", "is_active": i < 5}
+                    for i in range(7)
+                ]
+                await update_trading_hours(db, default_hours)
+                await db.commit()
+    except Exception as e:
+        logger.error(f"❌ Failed to seed trading hours: {e}")
+
     # Start Background Workers
     app.state.watcher_task = asyncio.create_task(watcher.start())
     app.state.ws_task = asyncio.create_task(broadcast_market_data())

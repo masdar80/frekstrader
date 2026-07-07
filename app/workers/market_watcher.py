@@ -314,16 +314,18 @@ class MarketWatcher:
 
             if decision.action in ["BUY", "SELL"]:
                 # Check Spread (protect against news spikes)
-                    typical_spread_points = symbol_info.get("spread", 0)
-                    point_value = symbol_info.get("point", 0.00001)
+                    typical_spread_points = symbol_info.get("spread", 0) if symbol_info else 0
+                    default_point = 0.001 if "JPY" in symbol else 0.00001
+                    point_value = (symbol_info.get("point") or default_point) if symbol_info else default_point
                     current_spread_points = current_spread / point_value if point_value else 0
+                    logger.info(f"  📏 Spread check {symbol}: raw={current_spread:.6f}, point={point_value}, pts={current_spread_points:.1f} (max={max(50, typical_spread_points * 2):.0f})")
                     
                     spread_ok = True
                     if current_spread_points > max(50, typical_spread_points * 2):
                         spread_ok = False
                         decision.action = "REJECT"
                         decision.reasoning += f" | Spread too high: {current_spread_points:.1f} pts (typical: {typical_spread_points})"
-                        logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts")
+                        logger.warning(f"  ❌ Spread blocked {symbol}: {current_spread_points:.1f} pts (point_value={point_value})")
 
                     if spread_ok:
                         # Check Economic Calendar
@@ -458,7 +460,6 @@ class MarketWatcher:
                     indicators_json[r.timeframe][ind_name] = r.value
             
             now_dt = datetime.now()
-            point_value = symbol_info.get("point", 0.00001)
             is_jpy = "JPY" in symbol
             pip_multiplier = 100 if is_jpy else 10000
             

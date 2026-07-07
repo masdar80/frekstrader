@@ -500,23 +500,35 @@ class MetaAPIClient:
 
     async def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
         """Get symbol specification (digits, lot size, etc.)."""
+        is_jpy = "JPY" in symbol
+        default_point = 0.001 if is_jpy else 0.00001
+        default_digits = 3 if is_jpy else 5
+
         if not self._connected:
-            return {}
+            return {
+                "symbol": symbol, "digits": default_digits, "contract_size": 100000,
+                "min_volume": 0.01, "max_volume": 100, "volume_step": 0.01, "point": default_point
+            }
 
         data = await self._get(f"/symbols/{symbol}/specification")
         if data:
+            raw_point = data.get("point", default_point)
+            # Safety: if MetaAPI returns a suspiciously small point for JPY, override it
+            if is_jpy and raw_point < 0.0001:
+                raw_point = default_point
+
             return {
                 "symbol": symbol,
-                "digits": data.get("digits", 5),
+                "digits": data.get("digits", default_digits),
                 "contract_size": data.get("contractSize", 100000),
                 "min_volume": data.get("minVolume", 0.01),
                 "max_volume": data.get("maxVolume", 100),
                 "volume_step": data.get("volumeStep", 0.01),
-                "point": data.get("point", 0.00001),
+                "point": raw_point,
             }
         return {
-            "symbol": symbol, "digits": 5, "contract_size": 100000,
-            "min_volume": 0.01, "max_volume": 100, "volume_step": 0.01, "point": 0.00001
+            "symbol": symbol, "digits": default_digits, "contract_size": 100000,
+            "min_volume": 0.01, "max_volume": 100, "volume_step": 0.01, "point": default_point
         }
 
     async def disconnect(self):
