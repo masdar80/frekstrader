@@ -14,8 +14,8 @@ except Exception as e:
     sys.exit(1)
 
 def main():
-    symbol = "EURUSD"
-    start_dt = "2024-01-02"
+    symbol = sys.argv[1] if len(sys.argv) > 1 else "EURUSD"
+    start_dt = "2026-01-01"
     end_dt = "2026-06-28"
     
     logger.info(f"Running backtest for {symbol} from {start_dt} to {end_dt}...")
@@ -36,6 +36,10 @@ def main():
     print(f"Win Rate:     {results.get('win_rate') * 100:.2f}%")
     print(f"Total Pips:   {results.get('total_pips')} pips")
     print("="*40, flush=True)
+    
+    print("\n--- FIRST 10 TRADES ---")
+    for t in results.get("trades", [])[:10]:
+        print(f"{t.direction} at {t.entry_price:.5f} | Close: {t.close_price:.5f} | Reason: {t.close_reason} | Pips: {t.profit_pips:.2f} | ATR: {t.atr:.5f}")
 
 if __name__ == "__main__":
     try:

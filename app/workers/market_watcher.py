@@ -201,6 +201,10 @@ class MarketWatcher:
         if open_positions:
             await self._check_trade_timeouts(open_positions)
 
+        # 7. Weekend Close Protection — close all positions before Friday market close
+        if open_positions and getattr(settings, "close_before_weekend", False):
+            await self._check_weekend_close(open_positions)
+
     async def _refresh_all_sentiment(self):
         """Fetch fresh sentiment for all pairs (runs every 6 hours).
         Completely skipped when use_ai_sentiment is False.
@@ -557,22 +561,33 @@ class MarketWatcher:
                             close_price = float(matching_deals[-1].get("price", 0) or 0)
                             
                         # Try to determine close reason
-                        reason = "broker_manual"
+                        # Strategy: use BOTH price proximity (if close_price is valid)
+                        # AND profit direction as a reliable fallback.
                         is_buy = trade.direction.upper() == "BUY"
                         tp = trade.take_profit
                         sl = trade.stop_loss
-                        
-                        if tp and close_price > 0:
-                            # 1 pip tolerance
-                            is_jpy = "JPY" in trade.symbol
-                            threshold = 0.02 if is_jpy else 0.0002
-                            if abs(close_price - tp) <= threshold:
+                        is_jpy = "JPY" in trade.symbol
+                        # Wider tolerance for JPY pairs and weekend gaps
+                        threshold = 0.10 if is_jpy else 0.0010
+
+                        reason = None
+                        if tp and sl and close_price > 0:
+                            tp_dist = abs(close_price - tp)
+                            sl_dist = abs(close_price - sl)
+                            if tp_dist <= threshold:
                                 reason = "tp"
-                        
-                        if sl and close_price > 0 and reason == "broker_manual":
-                            threshold = 0.02 if "JPY" in trade.symbol else 0.0002
-                            if abs(close_price - sl) <= threshold:
+                            elif sl_dist <= threshold:
                                 reason = "sl"
+
+                        # Fallback: use profit direction if price didn't match
+                        # (covers weekend gaps where broker fills outside SL/TP levels)
+                        if reason is None:
+                            if profit > 0:
+                                reason = "tp"   # profitable = hit take profit or trailed out in profit
+                            elif profit < 0:
+                                reason = "sl"   # loss = hit stop loss or gap-closed
+                            else:
+                                reason = "broker_manual"  # exactly 0 is truly ambiguous
 
                         logger.info(f"  💰 Found {len(matching_deals)} deals for {trade.symbol}: Total Profit ${profit:.2f} at price {close_price} (Reason: {reason})")
                         
@@ -705,6 +720,45 @@ class MarketWatcher:
         logger.info("Reconciling emergency closures for P&L tracking...")
         await asyncio.sleep(2.0)
         await self._reconcile_positions(await broker.get_positions(use_cache=False))
+
+    async def _check_weekend_close(self, open_positions: list):
+        """
+        Weekend Close Protection:
+        Closes ALL open positions on Friday after 21:00 UTC to avoid weekend gap risk.
+        Forex market closes at ~21:30 UTC on Friday. We close 30 min early.
+        """
+        now = datetime.utcnow()
+        # Friday = weekday 4
+        if now.weekday() != 4 or now.hour < 21:
+            return
+
+        logger.critical(
+            f"🌙 WEEKEND CLOSE: It is Friday {now.strftime('%H:%M')} UTC. "
+            f"Closing {len(open_positions)} open positions to avoid gap risk..."
+        )
+
+        for pos in open_positions:
+            pos_id = pos.get("id")
+            symbol = pos.get("symbol", "?")
+            try:
+                if pos_id:
+                    res = await broker.close_position(pos_id)
+                    if res.get("success"):
+                        logger.info(f"  ✅ Weekend close: {symbol} position {pos_id} closed.")
+                        async with async_session() as db:
+                            db_trades = await crud.get_open_trades_by_external_id(db)
+                            if str(pos_id) in db_trades:
+                                t = db_trades[str(pos_id)]
+                                await crud.close_trade(db, t.id, 0.0, 0.0, close_reason="weekend_close")
+                                await db.commit()
+                    else:
+                        logger.error(f"  ❌ Failed to weekend-close {symbol} {pos_id}: {res.get('error')}")
+            except Exception as e:
+                logger.error(f"  Error during weekend close of {symbol}: {e}")
+
+        await asyncio.sleep(2.0)
+        await self._reconcile_positions(await broker.get_positions(use_cache=False))
+
 
 # Global Instance
 watcher = MarketWatcher()

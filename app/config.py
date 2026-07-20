@@ -59,19 +59,20 @@ class Settings(BaseSettings):
     max_risk_per_trade_pct: float = 2.5
     max_daily_loss_pct: float = 5.0
     max_weekly_loss_pct: float = 10.0
-    max_open_positions: int = 15
-    max_drawdown_pct: float = 30.0
+    max_open_positions: int = 3
+    max_drawdown_pct: float = 20.0
     news_blackout_minutes: int = 15
-    drawdown_circuit_breaker_pct: float = 30.0
+    drawdown_circuit_breaker_pct: float = 20.0
     max_slippage_pips: float = 3.0
-    max_risk_amount_usd: float = 10.0  # Phase 1.3: Hard cap on trade loss
+    max_risk_amount_usd: float = 10.0  # Hard cap on trade loss
     risk_atr_mult_sl: float = 2.0      # SL distance = ATR × this
     risk_atr_mult_tp: float = 3.0      # TP distance = ATR × this
-    allow_multiple_per_pair: bool = True  # If True, can open 2+ positions on same pair
+    allow_multiple_per_pair: bool = False  # DISABLED: was causing position stacking on same pair
     multi_pair_cooldown_hours: float = 4.0 # Time required between trades on same pair
     multi_pair_min_distance_pips: float = 10.0 # Price distance required between trades on same pair
-    max_trade_hours: float = 96.0          # Phase 3: Auto-close stale trades
+    max_trade_hours: float = 48.0          # Auto-close stale trades after 48h (not 96)
     mock_balance_usd: float = 200.0        # Simulate a small account for testing
+    close_before_weekend: bool = True      # NEW: Auto-close all positions before Friday market close
 
     # === Trailing Stop Loss (Phase 2) ===
     trailing_stop_enabled: bool = True

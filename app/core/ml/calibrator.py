@@ -76,6 +76,11 @@ class MLConfidenceCalibrator:
             # Predict probability of class 1 (WIN)
             prob_win = self.model.predict_proba(X)[0][1]
             
+            # VETO: If ML model thinks this is a bad trade, kill it immediately
+            if prob_win < 0.35:
+                logger.warning(f"ML VETO: win probability {prob_win:.2f} is too low. Vetoing trade.")
+                return 0.0
+                
             # Blending: 60% rule-based, 40% ML-based
             blended = (base_confidence * 0.6) + (prob_win * 0.4)
             return round(blended, 3)

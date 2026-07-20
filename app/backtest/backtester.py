@@ -169,8 +169,9 @@ class Backtester:
                     metadata={"breakdown": ta_confluence["breakdown"]}
                 )
                 
-                decision = decision_engine.evaluate_signals(self.symbol, [tech_sig], regime_info)
-                
+                decision = decision_engine.evaluate_signals_with_config(
+                    self.symbol, [tech_sig], settings.confidence_threshold, regime_info=regime_info
+                )    
                 if decision.action in ["BUY", "SELL"]:
                     # Get ATR for SL/TP
                     atr_1h = 0.0010
